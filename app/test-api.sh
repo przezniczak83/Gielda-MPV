@@ -128,20 +128,45 @@ echo "$HEADERS" | grep -qi "x-frame-options: deny" \
   && { printf "✅  %-45s\n" "Security header: X-Frame-Options"; PASS=$((PASS+1)); } \
   || { printf "❌  %-45s MISSING\n" "Security header: X-Frame-Options"; FAIL=$((FAIL+1)); }
 
-# ── RATE LIMIT ────────────────────────────────────────────────────────────────
-# Używa nieprawidłowego tickera (cyfry) → fail validation (400), ale rate limit i tak się liczy.
-# Żądania 1-30: 400 | Żądanie 31: 429
+# ── RATE LIMIT HEADERS ────────────────────────────────────────────────────────
+
+echo "$HEADERS" | grep -qi "x-ratelimit-limit:" \
+  && { printf "✅  %-45s\n" "RateLimit header: X-RateLimit-Limit"; PASS=$((PASS+1)); } \
+  || { printf "❌  %-45s MISSING\n" "RateLimit header: X-RateLimit-Limit"; FAIL=$((FAIL+1)); }
+
+echo "$HEADERS" | grep -qi "x-ratelimit-remaining:" \
+  && { printf "✅  %-45s\n" "RateLimit header: X-RateLimit-Remaining"; PASS=$((PASS+1)); } \
+  || { printf "❌  %-45s MISSING\n" "RateLimit header: X-RateLimit-Remaining"; FAIL=$((FAIL+1)); }
+
+echo "$HEADERS" | grep -qi "x-ratelimit-reset:" \
+  && { printf "✅  %-45s\n" "RateLimit header: X-RateLimit-Reset"; PASS=$((PASS+1)); } \
+  || { printf "❌  %-45s MISSING\n" "RateLimit header: X-RateLimit-Reset"; FAIL=$((FAIL+1)); }
+
+# ── RATE LIMIT (POST 10/min) ──────────────────────────────────────────────────
+# POST limit: 10/min per IP. Sekcja walidacji wyżej zużywa już kilka slotów.
+# Wysyłamy 15 żądań — gwarantowane wyzwolenie 429 w oknie minuty.
+# Ticker '123' (format invalid) → 400 do limitu, potem 429.
 
 echo ""
-echo "Testing rate limit (31 × POST, ticker='123' = invalid format)..."
-LAST_CODE=""
-for i in $(seq 1 31); do
-  LAST_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/news" \
+echo "Testing POST rate limit (limit=10/min, sending up to 15 requests)..."
+RATE_LIMIT_AT=""
+for i in $(seq 1 15); do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/news" \
     -H "Content-Type: application/json" \
     -H "x-api-key: $API_KEY" \
     -d '{"ticker":"123","title":"Rate limit test payload ok"}')
+  if [[ "$CODE" == "429" ]]; then
+    RATE_LIMIT_AT="$i"
+    break
+  fi
 done
-check "Rate limit: 31st POST → 429" 429 "$LAST_CODE"
+if [[ -n "$RATE_LIMIT_AT" ]]; then
+  printf "✅  %-45s HTTP 429 (request #%s)\n" "Rate limit: POST → 429 triggered" "$RATE_LIMIT_AT"
+  PASS=$((PASS+1))
+else
+  printf "❌  %-45s 429 not seen in 15 requests\n" "Rate limit: POST → 429 not triggered"
+  FAIL=$((FAIL+1))
+fi
 
 # ── SUMMARY ───────────────────────────────────────────────────────────────────
 

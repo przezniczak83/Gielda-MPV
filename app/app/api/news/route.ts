@@ -5,7 +5,7 @@ import { recordRequest } from "@/lib/metrics";
 
 export const runtime = "nodejs";
 
-// ─── Security headers (dołączane do każdej odpowiedzi) ───────────────────────
+// ─── Security headers ─────────────────────────────────────────────────────────
 
 const SEC: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
@@ -13,35 +13,66 @@ const SEC: Record<string, string> = {
   "X-Frame-Options":        "DENY",
 };
 
-function respond(body: unknown, init: ResponseInit = {}, requestId?: string): NextResponse {
+type RateLimitInfo = { limit: number; remaining: number; resetAt: number };
+
+function respond(
+  body:       unknown,
+  init:       ResponseInit = {},
+  requestId?: string,
+  rl?:        RateLimitInfo,
+): NextResponse {
   const res = NextResponse.json(body, init);
   for (const [k, v] of Object.entries(SEC)) res.headers.set(k, v);
   if (requestId) res.headers.set("X-Request-Id", requestId);
+  if (rl) {
+    res.headers.set("X-RateLimit-Limit",     String(rl.limit));
+    res.headers.set("X-RateLimit-Remaining", String(rl.remaining));
+    res.headers.set("X-RateLimit-Reset",     String(rl.resetAt));
+  }
   return res;
 }
 
-// ─── In-memory rate limiter (30 POST / min / IP) ─────────────────────────────
+// ─── In-memory rate limiter ───────────────────────────────────────────────────
+// GET: 30 req/min/IP  |  POST: 10 req/min/IP
+// Redis-ready: zastąp checkRateLimit() wywołaniem INCR + EXPIRE bez zmiany API.
 
-const RL_MAX    = 30;
-const RL_WIN_MS = 60_000;
-const rlMap     = new Map<string, { count: number; resetAt: number }>();
+const RL_WIN_MS   = 60_000;
+const RL_GET_MAX  = 30;
+const RL_POST_MAX = 10;
 
-function checkRateLimit(ip: string): boolean {
+type RateLimitResult = {
+  allowed:   boolean;
+  limit:     number;
+  remaining: number;
+  resetAt:   number;   // Unix timestamp (sekundy)
+};
+
+const rlGetMap  = new Map<string, { count: number; resetAt: number }>();
+const rlPostMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(
+  ip:  string,
+  max: number,
+  map: Map<string, { count: number; resetAt: number }>,
+): RateLimitResult {
   const now = Date.now();
 
   // Usuń wygasłe wpisy gdy mapa jest duża
-  if (rlMap.size > 5_000) {
-    for (const [k, v] of rlMap) if (now > v.resetAt) rlMap.delete(k);
+  if (map.size > 5_000) {
+    for (const [k, v] of map) if (now > v.resetAt) map.delete(k);
   }
 
-  const entry = rlMap.get(ip);
+  const entry = map.get(ip);
   if (!entry || now > entry.resetAt) {
-    rlMap.set(ip, { count: 1, resetAt: now + RL_WIN_MS });
-    return true;
+    const resetAt = now + RL_WIN_MS;
+    map.set(ip, { count: 1, resetAt });
+    return { allowed: true,  limit: max, remaining: max - 1, resetAt: Math.ceil(resetAt / 1000) };
   }
-  if (entry.count >= RL_MAX) return false;
+  if (entry.count >= max) {
+    return { allowed: false, limit: max, remaining: 0,       resetAt: Math.ceil(entry.resetAt / 1000) };
+  }
   entry.count++;
-  return true;
+  return { allowed: true,  limit: max, remaining: max - entry.count, resetAt: Math.ceil(entry.resetAt / 1000) };
 }
 
 // ─── Structured logger ────────────────────────────────────────────────────────
@@ -90,9 +121,9 @@ function validatePost(raw: unknown): ValidationError | null {
 
   // title: wymagany, 5-300 znaków
   const title = String(b.title ?? "").trim();
-  if (!title)              return { field: "title", message: "title is required" };
-  if (title.length < 5)    return { field: "title", message: "title must be at least 5 characters" };
-  if (title.length > 300)  return { field: "title", message: "title must be at most 300 characters" };
+  if (!title)             return { field: "title", message: "title is required" };
+  if (title.length < 5)   return { field: "title", message: "title must be at least 5 characters" };
+  if (title.length > 300) return { field: "title", message: "title must be at most 300 characters" };
 
   // url: opcjonalny, ale jeśli podany musi być http/https
   if (b.url !== undefined && b.url !== null && b.url !== "") {
@@ -128,13 +159,13 @@ function isGitHubPagesBuild() {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type NewsInsert = {
-  ticker:       string;
-  title:        string;
-  source?:      string | null;
-  url?:         string | null;
+  ticker:        string;
+  title:         string;
+  source?:       string | null;
+  url?:          string | null;
   published_at?: string | null;
   impact_score?: number | null;
-  category?:    string | null;
+  category?:     string | null;
 };
 
 // ─── GET /api/news ────────────────────────────────────────────────────────────
@@ -152,10 +183,17 @@ export async function GET(req: Request) {
       return respond({ ok: false, error: "API disabled on GitHub Pages." }, { status: 501 }, requestId);
     }
 
+    // ── Rate limit ────────────────────────────────────────────────────────────
+    const rl = checkRateLimit(ip, RL_GET_MAX, rlGetMap);
+    if (!rl.allowed) {
+      logReq({ requestId, method: "GET", path, ip, ua, status: 429, ms: Date.now() - t0, error: "rate_limit" });
+      return respond({ ok: false, error: "Too many requests" }, { status: 429 }, requestId, rl);
+    }
+
     const { searchParams } = url;
     const tickers = searchParams.getAll("ticker");
 
-    // limit max 50 (poprzednio 100)
+    // limit max 50
     const limit  = Math.min(Math.max(Number(searchParams.get("limit")  ?? "25"), 1),    50);
     const offset = Math.min(Math.max(Number(searchParams.get("offset") ?? "0"),  0), 10_000);
 
@@ -168,7 +206,8 @@ export async function GET(req: Request) {
         return respond(
           { ok: false, error: "Validation error", field: "since", message: "since must be a valid ISO 8601 date" },
           { status: 400 },
-          requestId
+          requestId,
+          rl,
         );
       }
       since = d.toISOString();
@@ -192,13 +231,13 @@ export async function GET(req: Request) {
     if (error) {
       console.error("[GET /api/news] DB error:", error.code, error.message);
       logReq({ requestId, method: "GET", path, ip, ua, status: 500, ms: Date.now() - t0, error: error.code });
-      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
+      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId, rl);
     }
 
     logReq({ requestId, method: "GET", path, ip, ua, status: 200, ms: Date.now() - t0 });
     return respond({ ok: true, data }, {
       headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" },
-    }, requestId);
+    }, requestId, rl);
   } catch (err) {
     console.error("[GET /api/news] exception:", err);
     logReq({ requestId, method: "GET", path, ip, ua, status: 500, ms: Date.now() - t0, error: "exception" });
@@ -233,9 +272,10 @@ export async function POST(req: Request) {
     }
 
     // ── Rate limit ────────────────────────────────────────────────────────────
-    if (!checkRateLimit(ip)) {
+    const rl = checkRateLimit(ip, RL_POST_MAX, rlPostMap);
+    if (!rl.allowed) {
       logReq({ requestId, method: "POST", path, ip, ua, status: 429, ms: Date.now() - t0, error: "rate_limit" });
-      return respond({ ok: false, error: "Too many requests" }, { status: 429 }, requestId);
+      return respond({ ok: false, error: "Too many requests" }, { status: 429 }, requestId, rl);
     }
 
     // ── Parse body ────────────────────────────────────────────────────────────
@@ -246,7 +286,8 @@ export async function POST(req: Request) {
       return respond(
         { ok: false, error: "Validation error", field: "body", message: "Invalid JSON" },
         { status: 400 },
-        requestId
+        requestId,
+        rl,
       );
     }
 
@@ -257,12 +298,13 @@ export async function POST(req: Request) {
       return respond(
         { ok: false, error: "Validation error", field: ve.field, message: ve.message },
         { status: 400 },
-        requestId
+        requestId,
+        rl,
       );
     }
 
-    const b          = rawBody as Record<string, unknown>;
-    const rawTicker  = String(b.ticker).trim();
+    const b         = rawBody as Record<string, unknown>;
+    const rawTicker = String(b.ticker).trim();
 
     const supabaseUrl    = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
     const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -278,7 +320,7 @@ export async function POST(req: Request) {
     if (tErr) {
       console.error("[POST /api/news] ticker lookup error:", tErr.code, tErr.message);
       logReq({ requestId, method: "POST", path, ip, ua, status: 500, ms: Date.now() - t0, error: "ticker_lookup" });
-      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
+      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId, rl);
     }
 
     if (!tData?.ticker) {
@@ -286,7 +328,8 @@ export async function POST(req: Request) {
       return respond(
         { ok: false, error: "Validation error", field: "ticker", message: `Unknown ticker: ${rawTicker}` },
         { status: 400 },
-        requestId
+        requestId,
+        rl,
       );
     }
 
@@ -294,7 +337,7 @@ export async function POST(req: Request) {
     const payload: NewsInsert = {
       ticker:       rawTicker,
       title:        String(b.title ?? "").trim(),
-      source:       b.source ? String(b.source) : "manual",      // domyślnie "manual"
+      source:       b.source ? String(b.source) : "manual",
       url:          b.url    ? String(b.url).trim() : null,
       published_at: b.published_at ? String(b.published_at).trim() : null,
       impact_score: typeof b.impact_score === "number" ? b.impact_score : null,
@@ -311,15 +354,15 @@ export async function POST(req: Request) {
       if (error.code === "23505") {
         // Duplikat — operacja idempotentna → 200
         logReq({ requestId, method: "POST", path, ip, ua, status: 200, ms: Date.now() - t0 });
-        return respond({ ok: true, data: [], duplicate: true }, {}, requestId);
+        return respond({ ok: true, data: [], duplicate: true }, {}, requestId, rl);
       }
       console.error("[POST /api/news] upsert error:", error.code, "|", error.message, "|", error.details, "|", error.hint);
       logReq({ requestId, method: "POST", path, ip, ua, status: 500, ms: Date.now() - t0, error: `db:${error.code}` });
-      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
+      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId, rl);
     }
 
     logReq({ requestId, method: "POST", path, ip, ua, status: 200, ms: Date.now() - t0 });
-    return respond({ ok: true, data }, {}, requestId);
+    return respond({ ok: true, data }, {}, requestId, rl);
   } catch (err) {
     console.error("[POST /api/news] exception:", err);
     logReq({ requestId, method: "POST", path, ip, ua, status: 500, ms: Date.now() - t0, error: "exception" });
