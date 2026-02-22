@@ -3,7 +3,6 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-// Guard: GitHub Pages = static export, brak backendu i brak sekretów.
 function isGitHubPagesBuild() {
   return process.env.GITHUB_PAGES === "true";
 }
@@ -58,18 +57,12 @@ export async function GET(req: Request) {
     const { data, error } = await query;
 
     if (error) {
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, data });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
   }
 }
 
@@ -91,9 +84,19 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Partial<NewsInsert>;
 
-    // Minimalna walidacja + normalizacja
+    // 1) WALIDUJ surowy ticker (bez uppercasingu)
+    const rawTicker = String(body.ticker ?? "").trim();
+    const tickerStrictRegex = /^[A-Z]{1,6}$/;
+    if (!tickerStrictRegex.test(rawTicker)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid ticker format (must be A-Z only, 1–6 chars, no lowercase)." },
+        { status: 400 }
+      );
+    }
+
+    // 2) Buduj payload dopiero po walidacji
     const payload: NewsInsert = {
-      ticker: String(body.ticker ?? "").trim().toUpperCase(),
+      ticker: rawTicker, // już jest A-Z
       title: String(body.title ?? "").trim(),
       source: body.source ?? null,
       url: body.url ? String(body.url).trim() : null,
@@ -102,33 +105,25 @@ export async function POST(req: Request) {
       category: body.category ?? null,
     };
 
-    if (!payload.ticker || !payload.title) {
+    if (!payload.title) {
       return NextResponse.json(
-        { ok: false, error: "Missing required fields: ticker, title" },
+        { ok: false, error: "Missing required field: title" },
         { status: 400 }
       );
     }
 
-    // UPSERT po kolumnie "url"
-    // Wymaga: UNIQUE constraint albo UNIQUE index na news(url)
-    // (Postgres pozwala na wiele NULL w UNIQUE, więc url może być NULL)
+    // UPSERT po kolumnie url (onConflict = nazwa kolumny, nie constraint!)
     const { data, error } = await supabase
       .from("news")
       .upsert(payload, { onConflict: "url" })
       .select("*");
 
     if (error) {
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, data });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
   }
 }
