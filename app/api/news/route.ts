@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
+// Guard: GitHub Pages = static export, brak backendu i brak sekretów.
 function isGitHubPagesBuild() {
   return process.env.GITHUB_PAGES === "true";
 }
@@ -124,7 +125,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4) payload po przejściu walidacji
     const payload: NewsInsert = {
       ticker: rawTicker,
       title: String(body.title ?? "").trim(),
@@ -136,10 +136,7 @@ export async function POST(req: Request) {
     };
 
     if (!payload.title) {
-      return NextResponse.json(
-        { ok: false, error: "Missing required field: title" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "Missing required field: title" }, { status: 400 });
     }
 
     const { data, error } = await supabase
