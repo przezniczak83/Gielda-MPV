@@ -1,7 +1,3 @@
-# Sample workflow for building and deploying a Next.js site to GitHub Pages
-#
-# To get started with Next.js see: https://nextjs.org/docs/getting-started
-#
 name: Deploy Next.js site to Pages
 
 on:
@@ -18,73 +14,33 @@ concurrency:
   group: "pages"
   cancel-in-progress: false
 
-# IMPORTANT: your Next.js project lives in /app (not repo root)
-defaults:
-  run:
-    shell: bash
-    working-directory: app
-
-env:
-  NODE_VERSION: "20"
-
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: app
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect package manager (in /app)
-        id: detect-package-manager
-        run: |
-          if [ -f "${{ github.workspace }}/app/yarn.lock" ]; then
-            echo "manager=yarn" >> "$GITHUB_OUTPUT"
-            echo "command=install" >> "$GITHUB_OUTPUT"
-            echo "runner=yarn" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ -f "${{ github.workspace }}/app/pnpm-lock.yaml" ]; then
-            echo "manager=pnpm" >> "$GITHUB_OUTPUT"
-            echo "command=install" >> "$GITHUB_OUTPUT"
-            echo "runner=pnpm" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ -f "${{ github.workspace }}/app/package-lock.json" ]; then
-            echo "manager=npm" >> "$GITHUB_OUTPUT"
-            echo "command=ci" >> "$GITHUB_OUTPUT"
-            echo "runner=npx --no-install" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Unable to determine package manager (expected lockfile in /app: package-lock.json / yarn.lock / pnpm-lock.yaml)" >&2
-          exit 1
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: ${{ steps.detect-package-manager.outputs.manager }}
-          cache-dependency-path: |
-            app/package-lock.json
-            app/yarn.lock
-            app/pnpm-lock.yaml
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-        with:
-          static_site_generator: next
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
 
       - name: Install dependencies
-        run: ${{ steps.detect-package-manager.outputs.runner }} ${{ steps.detect-package-manager.outputs.command }}
+        run: npm ci
 
-      - name: Build with Next.js
-        run: ${{ steps.detect-package-manager.outputs.runner }} next build
+      - name: Build
+        run: npm run build
 
-      # For GitHub Pages we need a static export -> /app/out
       - name: Export static site
-        run: ${{ steps.detect-package-manager.outputs.runner }} next export
+        run: npx next export
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -97,5 +53,5 @@ jobs:
     environment:
       name: github-pages
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy
         uses: actions/deploy-pages@v4
