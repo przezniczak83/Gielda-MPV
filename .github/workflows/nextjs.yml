@@ -18,28 +18,31 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Ten przełącznik włącza GitHub Pages tryb w next.config.ts
       GITHUB_PAGES: "true"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node (no cache)
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
 
       - name: Install dependencies
+        working-directory: app
         run: npm ci
 
       - name: Build (Next.js export)
+        working-directory: app
         run: npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./out
+          path: app/out
 
   deploy:
     environment:
