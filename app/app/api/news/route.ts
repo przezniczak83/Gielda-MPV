@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
+import { recordRequest } from "@/lib/metrics";
 
 export const runtime = "nodejs";
 
@@ -57,6 +58,7 @@ function logReq(entry: {
 }) {
   // Nigdy nie logujemy klucza API
   console.log(JSON.stringify(entry));
+  recordRequest(entry.method, entry.status, entry.ms);
 }
 
 // ─── Walidacja POST ───────────────────────────────────────────────────────────
