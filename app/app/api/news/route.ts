@@ -34,11 +34,10 @@ export async function GET(req: Request) {
     auth: { persistSession: false },
   });
 
-  // TODO: jeśli Twoja tabela/kolumny nazywają się inaczej, poprawimy po unblokowaniu builda.
   let query = supabase
     .from("news")
     .select("*")
-    .order("published", { ascending: false })
+    .order("published_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
   if (tickers.length > 0) {
@@ -48,10 +47,7 @@ export async function GET(req: Request) {
   const { data, error } = await query;
 
   if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, data });
@@ -74,11 +70,9 @@ export async function POST(req: Request) {
 
   const body = await req.json();
 
-  // Minimalny insert — dopasujemy dokładnie do Twojego schematu w następnym kroku.
   const { data, error } = await supabase.from("news").insert(body).select("*");
 
   if (error) {
-    // 409 zwykle oznacza conflict/unique violation, ale nie zawsze.
     const status = error.code ? 409 : 500;
     return NextResponse.json({ ok: false, error: error.message }, { status });
   }
