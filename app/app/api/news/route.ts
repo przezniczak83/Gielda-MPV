@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import { recordRequest } from "@/lib/metrics";
 
@@ -172,6 +172,33 @@ function decodeCursor(cursor: string): string | null {
     return d.toISOString();
   } catch {
     return null;
+  }
+}
+
+// ─── Audit trail ─────────────────────────────────────────────────────────────
+// Zapisuje każdy POST który przeszedł auth + rate limit.
+// Best-effort: błąd zapisu audit nie blokuje odpowiedzi dla klienta.
+
+type AuditAction = "insert" | "duplicate" | "unknown_ticker";
+
+type AuditEntry = {
+  action:      AuditAction;
+  news_id:     string | null;
+  request_id:  string;
+  ip:          string;
+  user_agent:  string;
+  ticker:      string | null;
+  status_code: number;
+};
+
+async function writeAudit(
+  supabase: SupabaseClient,
+  entry: AuditEntry,
+): Promise<void> {
+  const { error } = await supabase.from("news_audit").insert(entry);
+  if (error) {
+    // Logujemy błąd ale nie przerywamy głównego flow
+    console.error("[audit] write error:", error.code, error.message);
   }
 }
 
@@ -372,6 +399,10 @@ export async function POST(req: Request) {
     }
 
     if (!tData?.ticker) {
+      await writeAudit(supabase, {
+        action: "unknown_ticker", news_id: null, request_id: requestId,
+        ip, user_agent: ua, ticker: rawTicker, status_code: 400,
+      });
       logReq({ requestId, method: "POST", path, ip, ua, status: 400, ms: Date.now() - t0, error: "unknown_ticker" });
       return respond(
         { ok: false, error: "Validation error", field: "ticker", message: `Unknown ticker: ${rawTicker}` },
@@ -401,6 +432,10 @@ export async function POST(req: Request) {
     if (error) {
       if (error.code === "23505") {
         // Duplikat — operacja idempotentna → 200
+        await writeAudit(supabase, {
+          action: "duplicate", news_id: null, request_id: requestId,
+          ip, user_agent: ua, ticker: rawTicker, status_code: 200,
+        });
         logReq({ requestId, method: "POST", path, ip, ua, status: 200, ms: Date.now() - t0 });
         return respond({ ok: true, data: [], duplicate: true }, {}, requestId, rl);
       }
@@ -409,6 +444,10 @@ export async function POST(req: Request) {
       return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId, rl);
     }
 
+    await writeAudit(supabase, {
+      action: "insert", news_id: data?.[0]?.id ?? null, request_id: requestId,
+      ip, user_agent: ua, ticker: rawTicker, status_code: 200,
+    });
     logReq({ requestId, method: "POST", path, ip, ua, status: 200, ms: Date.now() - t0 });
     return respond({ ok: true, data }, {}, requestId, rl);
   } catch (err) {
