@@ -35,8 +35,10 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const tickers = searchParams.getAll("ticker");
-    const limit = Number(searchParams.get("limit") ?? "25");
-    const offset = Number(searchParams.get("offset") ?? "0");
+
+    // T3: clamp limit i offset — zapobiega nadużyciom
+    const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "25"), 1), 100);
+    const offset = Math.min(Math.max(Number(searchParams.get("offset") ?? "0"), 0), 10000);
 
     const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
     const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -45,9 +47,10 @@ export async function GET(req: Request) {
       auth: { persistSession: false },
     });
 
+    // T4: explicit columns zamiast SELECT *
     let query = supabase
       .from("news")
-      .select("*")
+      .select("id, ticker, title, url, source, published_at, created_at")
       .order("published_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -58,13 +61,19 @@ export async function GET(req: Request) {
     const { data, error } = await query;
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      // T5: nie ujawniaj szczegółów błędu DB
+      return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, data });
-  } catch (e: any) {
+    // T2: Cache-Control dla Vercel Edge CDN
+    return NextResponse.json({ ok: true, data }, {
+      headers: {
+        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
+      },
+    });
+  } catch {
     return NextResponse.json(
-      { ok: false, error: e?.message || "Server error" },
+      { ok: false, error: "Internal error" },
       { status: 500 }
     );
   }
@@ -77,6 +86,12 @@ export async function POST(req: Request) {
         { ok: false, error: "API disabled on GitHub Pages (static export)." },
         { status: 501 }
       );
+    }
+
+    // T1: x-api-key — fail fast przed jakimkolwiek wywołaniem DB
+    const apiKey = req.headers.get("x-api-key");
+    if (!apiKey || apiKey !== process.env.INGEST_API_KEY) {
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 
     const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
@@ -112,10 +127,8 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (tErr) {
-      return NextResponse.json(
-        { ok: false, error: `Ticker lookup failed: ${tErr.message}` },
-        { status: 500 }
-      );
+      // T5: nie ujawniaj szczegółów błędu DB
+      return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
     }
 
     if (!tData?.ticker) {
@@ -139,19 +152,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Missing required field: title" }, { status: 400 });
     }
 
+    // T0-D: upsert po dedupe_key (DB-level constraint, obsługuje url=null)
     const { data, error } = await supabase
       .from("news")
-      .upsert(payload, { onConflict: "url" })
-      .select("*");
+      .upsert(payload, { onConflict: "dedupe_key" })
+      .select("id, ticker, title, url, source, published_at, created_at");
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      // T5: nie ujawniaj szczegółów błędu DB
+      return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, data });
-  } catch (e: any) {
+  } catch {
     return NextResponse.json(
-      { ok: false, error: e?.message || "Server error" },
+      { ok: false, error: "Internal error" },
       { status: 500 }
     );
   }
