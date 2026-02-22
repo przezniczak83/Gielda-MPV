@@ -62,7 +62,10 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ ok: true, data });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }
 
@@ -84,11 +87,11 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Partial<NewsInsert>;
 
-    // 1) Weź surowy ticker (bez toUpperCase) żeby wyłapać małe litery
+    // 1) surowy ticker (bez toUpperCase) – łapiemy małe litery
     const rawTicker = String(body.ticker ?? "").trim();
 
-    // 2) Minimalny format: brak małych liter; dopuszczamy A-Z, cyfry, kropkę i myślnik
-    //    (bo realnie tickery miewają np. BRK.B, RDS-A, itp.)
+    // 2) format: brak spacji i brak małych liter; dopuszczamy A-Z, cyfry, kropkę i myślnik
+    //    (realne tickery: BRK.B, RDS-A itd.)
     const tickerFormat = /^[A-Z0-9.-]{1,15}$/;
     if (!tickerFormat.test(rawTicker)) {
       return NextResponse.json(
@@ -100,8 +103,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3) WALIDACJA PO BAZIE: ticker musi istnieć w tabeli `tickers`
-    //    Zakładamy schemat: tickers(ticker TEXT PRIMARY KEY / UNIQUE)
+    // 3) walidacja po bazie: ticker musi istnieć w tabeli `tickers`
     const { data: tData, error: tErr } = await supabase
       .from("tickers")
       .select("ticker")
@@ -122,7 +124,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4) Payload po przejściu walidacji
+    // 4) payload po przejściu walidacji
     const payload: NewsInsert = {
       ticker: rawTicker,
       title: String(body.title ?? "").trim(),
@@ -134,7 +136,10 @@ export async function POST(req: Request) {
     };
 
     if (!payload.title) {
-      return NextResponse.json({ ok: false, error: "Missing required field: title" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing required field: title" },
+        { status: 400 }
+      );
     }
 
     const { data, error } = await supabase
@@ -148,6 +153,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, data });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }
