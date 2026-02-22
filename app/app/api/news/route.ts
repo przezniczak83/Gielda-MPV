@@ -350,6 +350,19 @@ export async function POST(req: Request) {
       return respond({ ok: false, error: "API disabled on GitHub Pages." }, { status: 501 }, requestId);
     }
 
+    // ── Feature flag: ENABLE_PUBLIC_INGEST ────────────────────────────────────
+    // MVP: domyślnie wyłączony. Włącz w Vercel env gdy Month 2+ / manual testing.
+    // ENABLE_PUBLIC_INGEST=true  → endpoint aktywny
+    // ENABLE_PUBLIC_INGEST=false (lub brak) → 503 z opisem
+    if (process.env.ENABLE_PUBLIC_INGEST !== "true") {
+      logReq({ requestId, method: "POST", path, ip, ua, status: 503, ms: Date.now() - t0, error: "ingest_disabled" });
+      return respond({
+        ok: false,
+        error: "Service Unavailable",
+        message: "Public ingest is disabled in MVP mode. Set ENABLE_PUBLIC_INGEST=true to enable.",
+      }, { status: 503 }, requestId);
+    }
+
     // ── IP allowlist ──────────────────────────────────────────────────────────
     if (ALLOWED_IPS && !ALLOWED_IPS.has(ip)) {
       logReq({ requestId, method: "POST", path, ip, ua, status: 403, ms: Date.now() - t0, error: "ip_blocked" });
