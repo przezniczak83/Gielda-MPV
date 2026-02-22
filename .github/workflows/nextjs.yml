@@ -43,9 +43,9 @@ jobs:
         working-directory: app
         run: npm ci
 
-      - name: Export static site
+      - name: Build (static export via output: 'export')
         working-directory: app
-        run: npx next export
+        run: npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
