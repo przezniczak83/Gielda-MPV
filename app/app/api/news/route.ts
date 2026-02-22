@@ -12,9 +12,10 @@ const SEC: Record<string, string> = {
   "X-Frame-Options":        "DENY",
 };
 
-function respond(body: unknown, init: ResponseInit = {}): NextResponse {
+function respond(body: unknown, init: ResponseInit = {}, requestId?: string): NextResponse {
   const res = NextResponse.json(body, init);
   for (const [k, v] of Object.entries(SEC)) res.headers.set(k, v);
+  if (requestId) res.headers.set("X-Request-Id", requestId);
   return res;
 }
 
@@ -47,6 +48,7 @@ function checkRateLimit(ip: string): boolean {
 function logReq(entry: {
   requestId: string;
   method:    string;
+  path:      string;
   ip:        string;
   ua:        string;
   status:    number;
@@ -140,13 +142,15 @@ export async function GET(req: Request) {
   const t0        = Date.now();
   const ip        = getIp(req);
   const ua        = req.headers.get("user-agent") ?? "";
+  const url       = new URL(req.url);
+  const path      = url.pathname;
 
   try {
     if (isGitHubPagesBuild()) {
-      return respond({ ok: false, error: "API disabled on GitHub Pages." }, { status: 501 });
+      return respond({ ok: false, error: "API disabled on GitHub Pages." }, { status: 501 }, requestId);
     }
 
-    const { searchParams } = new URL(req.url);
+    const { searchParams } = url;
     const tickers = searchParams.getAll("ticker");
 
     // limit max 50 (poprzednio 100)
@@ -161,7 +165,8 @@ export async function GET(req: Request) {
       if (isNaN(d.getTime())) {
         return respond(
           { ok: false, error: "Validation error", field: "since", message: "since must be a valid ISO 8601 date" },
-          { status: 400 }
+          { status: 400 },
+          requestId
         );
       }
       since = d.toISOString();
@@ -184,18 +189,18 @@ export async function GET(req: Request) {
 
     if (error) {
       console.error("[GET /api/news] DB error:", error.code, error.message);
-      logReq({ requestId, method: "GET", ip, ua, status: 500, ms: Date.now() - t0, error: error.code });
-      return respond({ ok: false, error: "Internal error" }, { status: 500 });
+      logReq({ requestId, method: "GET", path, ip, ua, status: 500, ms: Date.now() - t0, error: error.code });
+      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
     }
 
-    logReq({ requestId, method: "GET", ip, ua, status: 200, ms: Date.now() - t0 });
+    logReq({ requestId, method: "GET", path, ip, ua, status: 200, ms: Date.now() - t0 });
     return respond({ ok: true, data }, {
       headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" },
-    });
+    }, requestId);
   } catch (err) {
     console.error("[GET /api/news] exception:", err);
-    logReq({ requestId, method: "GET", ip, ua, status: 500, ms: Date.now() - t0, error: "exception" });
-    return respond({ ok: false, error: "Internal error" }, { status: 500 });
+    logReq({ requestId, method: "GET", path, ip, ua, status: 500, ms: Date.now() - t0, error: "exception" });
+    return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
   }
 }
 
@@ -206,28 +211,29 @@ export async function POST(req: Request) {
   const t0        = Date.now();
   const ip        = getIp(req);
   const ua        = req.headers.get("user-agent") ?? "";
+  const path      = new URL(req.url).pathname;
 
   try {
     if (isGitHubPagesBuild()) {
-      return respond({ ok: false, error: "API disabled on GitHub Pages." }, { status: 501 });
+      return respond({ ok: false, error: "API disabled on GitHub Pages." }, { status: 501 }, requestId);
     }
 
     // ── Auth: fail-closed (dwa kroki) ────────────────────────────────────────
     const envKey = (process.env.INGEST_API_KEY ?? "").trim();
     if (!envKey) {
       console.error("[POST /api/news] INGEST_API_KEY not configured — rejecting all requests");
-      return respond({ ok: false, error: "Unauthorized" }, { status: 401 });
+      return respond({ ok: false, error: "Unauthorized" }, { status: 401 }, requestId);
     }
     const headerKey = (req.headers.get("x-api-key") ?? "").trim();
     if (!headerKey || headerKey !== envKey) {
-      logReq({ requestId, method: "POST", ip, ua, status: 401, ms: Date.now() - t0, error: "auth" });
-      return respond({ ok: false, error: "Unauthorized" }, { status: 401 });
+      logReq({ requestId, method: "POST", path, ip, ua, status: 401, ms: Date.now() - t0, error: "auth" });
+      return respond({ ok: false, error: "Unauthorized" }, { status: 401 }, requestId);
     }
 
     // ── Rate limit ────────────────────────────────────────────────────────────
     if (!checkRateLimit(ip)) {
-      logReq({ requestId, method: "POST", ip, ua, status: 429, ms: Date.now() - t0, error: "rate_limit" });
-      return respond({ ok: false, error: "Too many requests" }, { status: 429 });
+      logReq({ requestId, method: "POST", path, ip, ua, status: 429, ms: Date.now() - t0, error: "rate_limit" });
+      return respond({ ok: false, error: "Too many requests" }, { status: 429 }, requestId);
     }
 
     // ── Parse body ────────────────────────────────────────────────────────────
@@ -237,17 +243,19 @@ export async function POST(req: Request) {
     } catch {
       return respond(
         { ok: false, error: "Validation error", field: "body", message: "Invalid JSON" },
-        { status: 400 }
+        { status: 400 },
+        requestId
       );
     }
 
     // ── Validate ──────────────────────────────────────────────────────────────
     const ve = validatePost(rawBody);
     if (ve) {
-      logReq({ requestId, method: "POST", ip, ua, status: 400, ms: Date.now() - t0, error: `validation:${ve.field}` });
+      logReq({ requestId, method: "POST", path, ip, ua, status: 400, ms: Date.now() - t0, error: `validation:${ve.field}` });
       return respond(
         { ok: false, error: "Validation error", field: ve.field, message: ve.message },
-        { status: 400 }
+        { status: 400 },
+        requestId
       );
     }
 
@@ -267,15 +275,16 @@ export async function POST(req: Request) {
 
     if (tErr) {
       console.error("[POST /api/news] ticker lookup error:", tErr.code, tErr.message);
-      logReq({ requestId, method: "POST", ip, ua, status: 500, ms: Date.now() - t0, error: "ticker_lookup" });
-      return respond({ ok: false, error: "Internal error" }, { status: 500 });
+      logReq({ requestId, method: "POST", path, ip, ua, status: 500, ms: Date.now() - t0, error: "ticker_lookup" });
+      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
     }
 
     if (!tData?.ticker) {
-      logReq({ requestId, method: "POST", ip, ua, status: 400, ms: Date.now() - t0, error: "unknown_ticker" });
+      logReq({ requestId, method: "POST", path, ip, ua, status: 400, ms: Date.now() - t0, error: "unknown_ticker" });
       return respond(
         { ok: false, error: "Validation error", field: "ticker", message: `Unknown ticker: ${rawTicker}` },
-        { status: 400 }
+        { status: 400 },
+        requestId
       );
     }
 
@@ -299,19 +308,19 @@ export async function POST(req: Request) {
     if (error) {
       if (error.code === "23505") {
         // Duplikat — operacja idempotentna → 200
-        logReq({ requestId, method: "POST", ip, ua, status: 200, ms: Date.now() - t0 });
-        return respond({ ok: true, data: [], duplicate: true });
+        logReq({ requestId, method: "POST", path, ip, ua, status: 200, ms: Date.now() - t0 });
+        return respond({ ok: true, data: [], duplicate: true }, {}, requestId);
       }
       console.error("[POST /api/news] upsert error:", error.code, "|", error.message, "|", error.details, "|", error.hint);
-      logReq({ requestId, method: "POST", ip, ua, status: 500, ms: Date.now() - t0, error: `db:${error.code}` });
-      return respond({ ok: false, error: "Internal error" }, { status: 500 });
+      logReq({ requestId, method: "POST", path, ip, ua, status: 500, ms: Date.now() - t0, error: `db:${error.code}` });
+      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
     }
 
-    logReq({ requestId, method: "POST", ip, ua, status: 200, ms: Date.now() - t0 });
-    return respond({ ok: true, data });
+    logReq({ requestId, method: "POST", path, ip, ua, status: 200, ms: Date.now() - t0 });
+    return respond({ ok: true, data }, {}, requestId);
   } catch (err) {
     console.error("[POST /api/news] exception:", err);
-    logReq({ requestId, method: "POST", ip, ua, status: 500, ms: Date.now() - t0, error: "exception" });
-    return respond({ ok: false, error: "Internal error" }, { status: 500 });
+    logReq({ requestId, method: "POST", path, ip, ua, status: 500, ms: Date.now() - t0, error: "exception" });
+    return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
   }
 }
