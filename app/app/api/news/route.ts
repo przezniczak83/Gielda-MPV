@@ -156,6 +156,25 @@ function isGitHubPagesBuild() {
   return process.env.GITHUB_PAGES === "true";
 }
 
+// ─── Cursor pagination ────────────────────────────────────────────────────────
+// Cursor = base64url(created_at ISO string).
+// Opaque dla klienta — format wewnętrzny może się zmienić bez łamania API.
+
+function encodeCursor(createdAt: string): string {
+  return Buffer.from(createdAt).toString("base64url");
+}
+
+function decodeCursor(cursor: string): string | null {
+  try {
+    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
+    const d = new Date(decoded);
+    if (isNaN(d.getTime())) return null;
+    return d.toISOString();
+  } catch {
+    return null;
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type NewsInsert = {
@@ -197,6 +216,21 @@ export async function GET(req: Request) {
     const limit  = Math.min(Math.max(Number(searchParams.get("limit")  ?? "25"), 1),    50);
     const offset = Math.min(Math.max(Number(searchParams.get("offset") ?? "0"),  0), 10_000);
 
+    // ?cursor — cursor pagination (nadpisuje ?offset gdy podany)
+    const cursorRaw = searchParams.get("cursor");
+    let cursorAt: string | null = null;
+    if (cursorRaw) {
+      cursorAt = decodeCursor(cursorRaw);
+      if (!cursorAt) {
+        return respond(
+          { ok: false, error: "Validation error", field: "cursor", message: "cursor is invalid" },
+          { status: 400 },
+          requestId,
+          rl,
+        );
+      }
+    }
+
     // ?since=ISO_DATE — opcjonalny filtr created_at >= since
     let since: string | null = null;
     const sinceRaw = searchParams.get("since");
@@ -217,14 +251,22 @@ export async function GET(req: Request) {
     const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
     const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
+    // Sortowanie po created_at DESC — stabilne dla cursor pagination.
+    // ?cursor → filtr created_at < cursor (następna strona).
+    // ?offset → backward-compat offset pagination (gdy cursor nieobecny).
     let query = supabase
       .from("news")
       .select("id, ticker, title, url, source, published_at, created_at")
-      .order("published_at", { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order("created_at", { ascending: false });
 
     if (tickers.length > 0) query = query.in("ticker", tickers);
     if (since)              query = query.gte("created_at", since);
+
+    if (cursorAt) {
+      query = query.lt("created_at", cursorAt).limit(limit);
+    } else {
+      query = query.range(offset, offset + limit - 1);
+    }
 
     const { data, error } = await query;
 
@@ -234,8 +276,14 @@ export async function GET(req: Request) {
       return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId, rl);
     }
 
+    // next_cursor: jest gdy wynik pełny (może być kolejna strona), null gdy ostatnia strona
+    const nextCursor: string | null =
+      data && data.length === limit
+        ? encodeCursor(data[data.length - 1].created_at)
+        : null;
+
     logReq({ requestId, method: "GET", path, ip, ua, status: 200, ms: Date.now() - t0 });
-    return respond({ ok: true, data }, {
+    return respond({ ok: true, data, next_cursor: nextCursor }, {
       headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" },
     }, requestId, rl);
   } catch (err) {

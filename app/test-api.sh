@@ -117,6 +117,25 @@ check "GET with valid ?since filter" 200 "$C"
 C=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/news?since=not-a-date")
 check "GET with invalid ?since → 400" 400 "$C"
 
+# ── CURSOR PAGINATION ─────────────────────────────────────────────────────────
+
+B=$(curl -s "$BASE_URL/api/news?limit=1")
+HAS_CURSOR=$(echo "$B" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if 'next_cursor' in d else 'no')" 2>/dev/null || echo "no")
+[[ "$HAS_CURSOR" == "yes" ]] \
+  && { printf "✅  %-45s\n" "GET response contains next_cursor field"; PASS=$((PASS+1)); } \
+  || { printf "❌  %-45s\n" "GET response missing next_cursor field"; FAIL=$((FAIL+1)); }
+
+C=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/news?cursor=not-valid-cursor!!!")
+check "GET invalid cursor → 400" 400 "$C"
+
+CURSOR=$(echo "$B" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('next_cursor') or '')" 2>/dev/null || echo "")
+if [[ -n "$CURSOR" ]]; then
+  C=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/news?limit=1&cursor=$CURSOR")
+  check "GET cursor → next page 200" 200 "$C"
+else
+  printf "⏭️   %-45s skipped (next_cursor=null, DB may be empty)\n" "GET cursor → next page 200"
+fi
+
 # ── SECURITY HEADERS ─────────────────────────────────────────────────────────
 
 HEADERS=$(curl -sI "$BASE_URL/api/news?limit=1")
