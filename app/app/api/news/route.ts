@@ -58,12 +58,18 @@ export async function GET(req: Request) {
     const { data, error } = await query;
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ ok: true, data });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }
 
@@ -85,7 +91,7 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Partial<NewsInsert>;
 
-    // Minimalna walidacja
+    // Minimalna walidacja + normalizacja
     const payload: NewsInsert = {
       ticker: String(body.ticker ?? "").trim().toUpperCase(),
       title: String(body.title ?? "").trim(),
@@ -103,19 +109,26 @@ export async function POST(req: Request) {
       );
     }
 
-    // UPSERT po url (wymaga UNIQUE index na news.url)
-    // Po Twoim SQL: CREATE UNIQUE INDEX news_url_unique_idx ON news(url) WHERE url IS NOT NULL;
+    // UPSERT po kolumnie "url"
+    // Wymaga: UNIQUE constraint albo UNIQUE index na news(url)
+    // (Postgres pozwala na wiele NULL w UNIQUE, więc url może być NULL)
     const { data, error } = await supabase
       .from("news")
       .upsert(payload, { onConflict: "url" })
       .select("*");
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ ok: true, data });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }
