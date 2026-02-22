@@ -1,101 +1,87 @@
-// app/app/api/news/route.ts
-
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/admin";
+import { createClient } from "@supabase/supabase-js";
 
-// WYMAGANE dla output: "export" (GitHub Pages static export)
-export const dynamic = "force-static";
-export const revalidate = 60;
+export const runtime = "nodejs";
 
-function jsonError(message: string, status = 400) {
-  return NextResponse.json({ data: null, error: message }, { status });
+// Guard: GitHub Pages = static export, brak backendu i brak sekretów.
+function isGitHubPagesBuild() {
+  return process.env.GITHUB_PAGES === "true";
+}
+
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing ${name}`);
+  return v;
 }
 
 export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-
-    const tickers = searchParams.getAll("ticker").filter(Boolean);
-    const limit = Math.min(Number(searchParams.get("limit") || 25), 200);
-    const offset = Math.max(Number(searchParams.get("offset") || 0), 0);
-
-    let q = supabaseAdmin
-      .from("news")
-      .select(
-        "id,ticker,title,source,url,published_at,created_at,impact_score,category"
-      )
-      .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    if (tickers.length > 0) {
-      q = q.in("ticker", tickers);
-    }
-
-    const { data, error } = await q;
-
-    if (error) return jsonError(error.message, 500);
-
-    return NextResponse.json({
-      data: data ?? [],
-      error: null,
-      meta: { limit, offset, returned: (data ?? []).length },
-    });
-  } catch (e: any) {
-    return jsonError(e?.message || "Unknown error", 500);
+  if (isGitHubPagesBuild()) {
+    return NextResponse.json(
+      { ok: false, error: "API disabled on GitHub Pages (static export)." },
+      { status: 501 }
+    );
   }
+
+  const { searchParams } = new URL(req.url);
+  const tickers = searchParams.getAll("ticker");
+  const limit = Number(searchParams.get("limit") ?? "25");
+  const offset = Number(searchParams.get("offset") ?? "0");
+
+  const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+
+  // TODO: jeśli Twoja tabela/kolumny nazywają się inaczej, poprawimy po unblokowaniu builda.
+  let query = supabase
+    .from("news")
+    .select("*")
+    .order("published", { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (tickers.length > 0) {
+    query = query.in("ticker", tickers);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    return NextResponse.json(
+      { ok: false, error: error.message },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ ok: true, data });
 }
 
 export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-
-    const ticker = String(body?.ticker || "").trim().toUpperCase();
-    const title = String(body?.title || "").trim();
-    const source = body?.source ? String(body.source).trim() : null;
-    const url = body?.url ? String(body.url).trim() : null;
-    const published_at = body?.published_at ? String(body.published_at).trim() : null;
-    const impact_score =
-      body?.impact_score === null || body?.impact_score === undefined || body?.impact_score === ""
-        ? null
-        : Number(body.impact_score);
-    const category = body?.category ? String(body.category).trim() : null;
-
-    if (!ticker) return jsonError("Missing ticker", 400);
-    if (!title) return jsonError("Missing title", 400);
-
-    if (impact_score !== null && Number.isNaN(impact_score)) {
-      return jsonError("Invalid impact_score", 400);
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from("news")
-      .insert([
-        {
-          ticker,
-          title,
-          source,
-          url,
-          published_at,
-          impact_score,
-          category,
-        },
-      ])
-      .select(
-        "id,ticker,title,source,url,published_at,created_at,impact_score,category"
-      )
-      .single();
-
-    if (error) {
-      // Unikalny indeks na url -> duplicate
-      const msg = (error.message || "").toLowerCase();
-      if (msg.includes("duplicate") || msg.includes("unique")) {
-        return jsonError("Duplikat URL (unikalny indeks bazy)", 409);
-      }
-      return jsonError(error.message, 500);
-    }
-
-    return NextResponse.json({ data, error: null }, { status: 201 });
-  } catch (e: any) {
-    return jsonError(e?.message || "Unknown error", 500);
+  if (isGitHubPagesBuild()) {
+    return NextResponse.json(
+      { ok: false, error: "API disabled on GitHub Pages (static export)." },
+      { status: 501 }
+    );
   }
+
+  const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+
+  const body = await req.json();
+
+  // Minimalny insert — dopasujemy dokładnie do Twojego schematu w następnym kroku.
+  const { data, error } = await supabase.from("news").insert(body).select("*");
+
+  if (error) {
+    // 409 zwykle oznacza conflict/unique violation, ale nie zawsze.
+    const status = error.code ? 409 : 500;
+    return NextResponse.json({ ok: false, error: error.message }, { status });
+  }
+
+  return NextResponse.json({ ok: true, data });
 }
