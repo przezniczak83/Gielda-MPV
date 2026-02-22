@@ -117,6 +117,19 @@ check "GET with valid ?since filter" 200 "$C"
 C=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/news?since=not-a-date")
 check "GET with invalid ?since → 400" 400 "$C"
 
+# ── SOFT DELETE ───────────────────────────────────────────────────────────────
+
+C=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE_URL/api/news?id=00000000-0000-0000-0000-000000000001")
+check "DELETE without x-api-key → 401" 401 "$C"
+
+C=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE_URL/api/news?id=not-a-uuid" \
+  -H "x-api-key: $API_KEY")
+check "DELETE invalid UUID → 400" 400 "$C"
+
+C=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE_URL/api/news?id=00000000-0000-0000-0000-000000000001" \
+  -H "x-api-key: $API_KEY")
+check "DELETE non-existent UUID → 404" 404 "$C"
+
 # ── CURSOR PAGINATION ─────────────────────────────────────────────────────────
 
 B=$(curl -s "$BASE_URL/api/news?limit=1")

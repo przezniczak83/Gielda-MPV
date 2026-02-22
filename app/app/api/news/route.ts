@@ -179,7 +179,9 @@ function decodeCursor(cursor: string): string | null {
 // Zapisuje każdy POST który przeszedł auth + rate limit.
 // Best-effort: błąd zapisu audit nie blokuje odpowiedzi dla klienta.
 
-type AuditAction = "insert" | "duplicate" | "unknown_ticker";
+type AuditAction = "insert" | "duplicate" | "unknown_ticker" | "delete";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type AuditEntry = {
   action:      AuditAction;
@@ -284,6 +286,7 @@ export async function GET(req: Request) {
     let query = supabase
       .from("news")
       .select("id, ticker, title, url, source, published_at, created_at")
+      .is("deleted_at", null)                          // soft delete — ukryj skasowane
       .order("created_at", { ascending: false });
 
     if (tickers.length > 0) query = query.in("ticker", tickers);
@@ -453,6 +456,95 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("[POST /api/news] exception:", err);
     logReq({ requestId, method: "POST", path, ip, ua, status: 500, ms: Date.now() - t0, error: "exception" });
+    return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
+  }
+}
+
+// ─── DELETE /api/news?id=<uuid> ───────────────────────────────────────────────
+// Soft delete: ustawia deleted_at = now(). Rekord pozostaje w DB.
+// Chroniony tym samym x-api-key co POST.
+
+export async function DELETE(req: Request) {
+  const requestId = randomUUID();
+  const t0        = Date.now();
+  const ip        = getIp(req);
+  const ua        = req.headers.get("user-agent") ?? "";
+  const path      = new URL(req.url).pathname;
+
+  try {
+    if (isGitHubPagesBuild()) {
+      return respond({ ok: false, error: "API disabled on GitHub Pages." }, { status: 501 }, requestId);
+    }
+
+    // ── Auth ──────────────────────────────────────────────────────────────────
+    const envKey = (process.env.INGEST_API_KEY ?? "").trim();
+    if (!envKey) {
+      return respond({ ok: false, error: "Unauthorized" }, { status: 401 }, requestId);
+    }
+    const headerKey = (req.headers.get("x-api-key") ?? "").trim();
+    if (!headerKey || headerKey !== envKey) {
+      logReq({ requestId, method: "DELETE", path, ip, ua, status: 401, ms: Date.now() - t0, error: "auth" });
+      return respond({ ok: false, error: "Unauthorized" }, { status: 401 }, requestId);
+    }
+
+    // ── Rate limit (dzieli pulę z POST) ───────────────────────────────────────
+    const rl = checkRateLimit(ip, RL_POST_MAX, rlPostMap);
+    if (!rl.allowed) {
+      logReq({ requestId, method: "DELETE", path, ip, ua, status: 429, ms: Date.now() - t0, error: "rate_limit" });
+      return respond({ ok: false, error: "Too many requests" }, { status: 429 }, requestId, rl);
+    }
+
+    // ── Walidacja ?id ─────────────────────────────────────────────────────────
+    const id = new URL(req.url).searchParams.get("id") ?? "";
+    if (!id) {
+      return respond(
+        { ok: false, error: "Validation error", field: "id", message: "id is required" },
+        { status: 400 }, requestId, rl,
+      );
+    }
+    if (!UUID_RE.test(id)) {
+      return respond(
+        { ok: false, error: "Validation error", field: "id", message: "id must be a valid UUID" },
+        { status: 400 }, requestId, rl,
+      );
+    }
+
+    const supabaseUrl    = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+    const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    // ── Soft delete ───────────────────────────────────────────────────────────
+    const { data, error } = await supabase
+      .from("news")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("deleted_at", null)          // idempotent — nie nadpisuj jeśli już skasowany
+      .select("id, ticker, deleted_at");
+
+    if (error) {
+      console.error("[DELETE /api/news] DB error:", error.code, error.message);
+      logReq({ requestId, method: "DELETE", path, ip, ua, status: 500, ms: Date.now() - t0, error: error.code });
+      return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId, rl);
+    }
+
+    if (!data || data.length === 0) {
+      logReq({ requestId, method: "DELETE", path, ip, ua, status: 404, ms: Date.now() - t0, error: "not_found" });
+      return respond(
+        { ok: false, error: "Not found", message: "Record not found or already deleted" },
+        { status: 404 }, requestId, rl,
+      );
+    }
+
+    await writeAudit(supabase, {
+      action: "delete", news_id: id, request_id: requestId,
+      ip, user_agent: ua, ticker: data[0].ticker ?? null, status_code: 200,
+    });
+
+    logReq({ requestId, method: "DELETE", path, ip, ua, status: 200, ms: Date.now() - t0 });
+    return respond({ ok: true, data: data[0] }, {}, requestId, rl);
+  } catch (err) {
+    console.error("[DELETE /api/news] exception:", err);
+    logReq({ requestId, method: "DELETE", path, ip, ua, status: 500, ms: Date.now() - t0, error: "exception" });
     return respond({ ok: false, error: "Internal error" }, { status: 500 }, requestId);
   }
 }
