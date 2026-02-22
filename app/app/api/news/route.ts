@@ -3,14 +3,13 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-// Guard: GitHub Pages = static export, brak backendu i brak sekretów.
 function isGitHubPagesBuild() {
   return process.env.GITHUB_PAGES === "true";
 }
 
 function requireEnv(name: string): string {
   const v = process.env[name];
-  if (!v) throw new Error(`Missing ${name}`);
+  if (!v) throw new Error(`Missing env: ${name}`);
   return v;
 }
 
@@ -24,6 +23,8 @@ type NewsInsert = {
   category?: string | null;
 };
 
+// ─── GET /api/news ────────────────────────────────────────────────────────────
+
 export async function GET(req: Request) {
   try {
     if (isGitHubPagesBuild()) {
@@ -35,19 +36,16 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const tickers = searchParams.getAll("ticker");
+    const limit  = Math.min(Math.max(Number(searchParams.get("limit")  ?? "25"), 1),   100);
+    const offset = Math.min(Math.max(Number(searchParams.get("offset") ?? "0"),  0), 10000);
 
-    // T3: clamp limit i offset — zapobiega nadużyciom
-    const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "25"), 1), 100);
-    const offset = Math.min(Math.max(Number(searchParams.get("offset") ?? "0"), 0), 10000);
-
-    const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+    const supabaseUrl    = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
     const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false },
     });
 
-    // T4: explicit columns zamiast SELECT *
     let query = supabase
       .from("news")
       .select("id, ticker, title, url, source, published_at, created_at")
@@ -61,23 +59,22 @@ export async function GET(req: Request) {
     const { data, error } = await query;
 
     if (error) {
-      // T5: nie ujawniaj szczegółów błędu DB
+      console.error("[GET /api/news] DB error:", error.code, error.message);
       return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
     }
 
-    // T2: Cache-Control dla Vercel Edge CDN
     return NextResponse.json({ ok: true, data }, {
       headers: {
         "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
       },
     });
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "Internal error" },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error("[GET /api/news] unhandled exception:", err);
+    return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
   }
 }
+
+// ─── POST /api/news ───────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
   try {
@@ -88,13 +85,21 @@ export async function POST(req: Request) {
       );
     }
 
-    // T1: x-api-key — fail fast przed jakimkolwiek wywołaniem DB
-    const apiKey = req.headers.get("x-api-key");
-    if (!apiKey || apiKey !== process.env.INGEST_API_KEY) {
+    // ── AUTH: fail-closed, dwa osobne kroki ──────────────────────────────────
+    // Krok 1: env key musi być skonfigurowany — jeśli nie, odrzuć wszystkie żądania
+    const envKey = (process.env.INGEST_API_KEY ?? "").trim();
+    if (!envKey) {
+      console.error("[POST /api/news] INGEST_API_KEY not set — all POST requests rejected");
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
+    // Krok 2: nagłówek musi być obecny i dokładnie pasować (po trim)
+    const headerKey = (req.headers.get("x-api-key") ?? "").trim();
+    if (!headerKey || headerKey !== envKey) {
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
-    const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+    const supabaseUrl    = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
     const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
@@ -103,23 +108,17 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Partial<NewsInsert>;
 
-    // 1) surowy ticker (bez toUpperCase) – łapiemy małe litery
+    // Walidacja tickera — format
     const rawTicker = String(body.ticker ?? "").trim();
-
-    // 2) format: brak spacji i brak małych liter; dopuszczamy A-Z, cyfry, kropkę i myślnik
-    //    (realne tickery: BRK.B, RDS-A itd.)
     const tickerFormat = /^[A-Z0-9.-]{1,15}$/;
     if (!tickerFormat.test(rawTicker)) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Invalid ticker format (A-Z/0-9/./-, 1–15 chars; no lowercase; no spaces)",
-        },
+        { ok: false, error: "Invalid ticker format (A-Z/0-9/./-, 1–15 chars; no lowercase; no spaces)" },
         { status: 400 }
       );
     }
 
-    // 3) walidacja po bazie: ticker musi istnieć w tabeli `tickers`
+    // Walidacja tickera — istnienie w DB
     const { data: tData, error: tErr } = await supabase
       .from("tickers")
       .select("ticker")
@@ -127,7 +126,7 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (tErr) {
-      // T5: nie ujawniaj szczegółów błędu DB
+      console.error("[POST /api/news] ticker lookup error:", tErr.code, tErr.message);
       return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
     }
 
@@ -139,35 +138,47 @@ export async function POST(req: Request) {
     }
 
     const payload: NewsInsert = {
-      ticker: rawTicker,
-      title: String(body.title ?? "").trim(),
-      source: body.source ?? null,
-      url: body.url ? String(body.url).trim() : null,
+      ticker:       rawTicker,
+      title:        String(body.title ?? "").trim(),
+      source:       body.source       ?? null,
+      url:          body.url          ? String(body.url).trim() : null,
       published_at: body.published_at ? String(body.published_at).trim() : null,
       impact_score: body.impact_score ?? null,
-      category: body.category ?? null,
+      category:     body.category     ?? null,
     };
 
     if (!payload.title) {
-      return NextResponse.json({ ok: false, error: "Missing required field: title" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing required field: title" },
+        { status: 400 }
+      );
     }
 
-    // T0-D: upsert po dedupe_key (DB-level constraint, obsługuje url=null)
+    // Upsert idempotentny po dedupe_key (kolumna GENERATED ALWAYS AS w DB).
+    // Duplikat (23505 unique_violation) traktujemy jako sukces — żądanie jest idempotentne.
     const { data, error } = await supabase
       .from("news")
       .upsert(payload, { onConflict: "dedupe_key" })
       .select("id, ticker, title, url, source, published_at, created_at");
 
     if (error) {
-      // T5: nie ujawniaj szczegółów błędu DB
+      if (error.code === "23505") {
+        // Duplikat — operacja idempotentna, zwróć sukces
+        return NextResponse.json({ ok: true, data: [], duplicate: true });
+      }
+      // Loguj pełen kontekst błędu server-side (widoczne w Vercel Function Logs)
+      console.error(
+        "[POST /api/news] upsert error — code:", error.code,
+        "| message:", error.message,
+        "| details:", error.details,
+        "| hint:", error.hint
+      );
       return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, data });
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "Internal error" },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error("[POST /api/news] unhandled exception:", err);
+    return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
   }
 }
