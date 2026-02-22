@@ -17,7 +17,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
+      # Tell next.config.ts we are building for GitHub Pages
+      GITHUB_PAGES: "true"
+
+      # Supabase (required at build-time by your code)
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
@@ -41,7 +46,7 @@ jobs:
         working-directory: app
         run: npm ci
 
-      - name: Build
+      - name: Build (static export)
         working-directory: app
         run: npm run build
 
