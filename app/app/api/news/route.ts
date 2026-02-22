@@ -5,6 +5,19 @@ import { recordRequest } from "@/lib/metrics";
 
 export const runtime = "nodejs";
 
+// ─── IP allowlist ─────────────────────────────────────────────────────────────
+// ALLOWED_IPS: przecinkowa lista IP (np. "1.2.3.4,5.6.7.8").
+// Gdy ustawiony: POST i DELETE akceptują tylko te adresy.
+// Gdy pusty/nieustawiony: brak ograniczeń — backward compatible.
+// Parsujemy raz przy cold-start, nie przy każdym żądaniu.
+
+const ALLOWED_IPS: Set<string> | null = (() => {
+  const raw = (process.env.ALLOWED_IPS ?? "").trim();
+  if (!raw) return null;
+  const ips = raw.split(",").map(s => s.trim()).filter(Boolean);
+  return ips.length > 0 ? new Set(ips) : null;
+})();
+
 // ─── Security headers ─────────────────────────────────────────────────────────
 
 const SEC: Record<string, string> = {
@@ -337,6 +350,12 @@ export async function POST(req: Request) {
       return respond({ ok: false, error: "API disabled on GitHub Pages." }, { status: 501 }, requestId);
     }
 
+    // ── IP allowlist ──────────────────────────────────────────────────────────
+    if (ALLOWED_IPS && !ALLOWED_IPS.has(ip)) {
+      logReq({ requestId, method: "POST", path, ip, ua, status: 403, ms: Date.now() - t0, error: "ip_blocked" });
+      return respond({ ok: false, error: "Forbidden" }, { status: 403 }, requestId);
+    }
+
     // ── Auth: fail-closed (dwa kroki) ────────────────────────────────────────
     const envKey = (process.env.INGEST_API_KEY ?? "").trim();
     if (!envKey) {
@@ -474,6 +493,12 @@ export async function DELETE(req: Request) {
   try {
     if (isGitHubPagesBuild()) {
       return respond({ ok: false, error: "API disabled on GitHub Pages." }, { status: 501 }, requestId);
+    }
+
+    // ── IP allowlist ──────────────────────────────────────────────────────────
+    if (ALLOWED_IPS && !ALLOWED_IPS.has(ip)) {
+      logReq({ requestId, method: "DELETE", path, ip, ua, status: 403, ms: Date.now() - t0, error: "ip_blocked" });
+      return respond({ ok: false, error: "Forbidden" }, { status: 403 }, requestId);
     }
 
     // ── Auth ──────────────────────────────────────────────────────────────────

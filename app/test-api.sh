@@ -42,6 +42,11 @@ echo ""
 echo "━━━ Integration Tests: $BASE_URL ━━━"
 echo ""
 
+# ── IP ALLOWLIST NOTE ─────────────────────────────────────────────────────────
+# ALLOWED_IPS env var: comma-separated list of allowed IPs for POST/DELETE.
+# Gdy ustawiony, żądania spoza listy otrzymują 403 Forbidden.
+# Test: jeśli ten skrypt zwróci 403 na POST, dodaj IP hosta do ALLOWED_IPS.
+
 # ── AUTH ──────────────────────────────────────────────────────────────────────
 
 C=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/news" \
