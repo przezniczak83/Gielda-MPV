@@ -69,6 +69,16 @@ function parseTickers(input: string): string[] {
 }
 
 export default function Page() {
+  /**
+   * API base URL:
+   * - default: ""  => relative calls like /api/news (Vercel, local)
+   * - optional: set NEXT_PUBLIC_API_BASE_URL="https://gielda-mpv.vercel.app"
+   */
+  const API_BASE_URL =
+    (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
+
+  const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
+
   // ---- FORM
   const [ticker, setTicker] = useState("AAPL");
   const [title, setTitle] = useState("Test news item");
@@ -78,7 +88,10 @@ export default function Page() {
   const [impact, setImpact] = useState("5");
   const [category, setCategory] = useState("test");
 
-  const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [message, setMessage] = useState<{
+    kind: "ok" | "err";
+    text: string;
+  } | null>(null);
   const clearMessage = () => setMessage(null);
 
   // ---- LIST / FILTER
@@ -97,7 +110,7 @@ export default function Page() {
     for (const t of tickers) params.append("ticker", t);
     params.set("limit", String(limit));
     params.set("offset", String(offset));
-    return `/api/news?${params.toString()}`;
+    return apiUrl(`/api/news?${params.toString()}`);
   };
 
   const load = async () => {
@@ -107,11 +120,23 @@ export default function Page() {
       setLastQuery(listUrl);
 
       const res = await fetch(listUrl, { method: "GET" });
-      const json = (await res.json()) as ApiListResponse;
+
+      // Jeśli backend zwróci HTML (np. 404), res.json() wywali "Unexpected token <"
+      // więc łapiemy to czytelnie:
+      const text = await res.text();
+      let json: ApiListResponse | null = null;
+      try {
+        json = JSON.parse(text) as ApiListResponse;
+      } catch {
+        json = { data: [], error: `Nie-JSON response (${res.status}). Próbowałem: ${listUrl}` };
+      }
 
       if (!res.ok || json.error) {
         setRows([]);
-        setMessage({ kind: "err", text: json.error || `Błąd pobierania (${res.status})` });
+        setMessage({
+          kind: "err",
+          text: json.error || `Błąd pobierania (${res.status})`,
+        });
         return;
       }
 
@@ -144,16 +169,27 @@ export default function Page() {
     };
 
     try {
-      const res = await fetch("/api/news", {
+      const postUrl = apiUrl("/api/news");
+
+      const res = await fetch(postUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      const json = (await res.json()) as ApiInsertResponse;
+      const text = await res.text();
+      let json: ApiInsertResponse | null = null;
+      try {
+        json = JSON.parse(text) as ApiInsertResponse;
+      } catch {
+        json = { data: null, error: `Nie-JSON response (${res.status}). Próbowałem: ${postUrl}` };
+      }
 
       if (!res.ok || json.error) {
-        setMessage({ kind: "err", text: json.error || `Błąd (${res.status})` });
+        setMessage({
+          kind: "err",
+          text: json.error || `Błąd (${res.status})`,
+        });
         return;
       }
 
@@ -162,8 +198,7 @@ export default function Page() {
       // 1) po dodaniu wróć na pierwszą stronę wyników
       setOffset(0);
 
-      // 2) i odśwież listę (jeśli offset już 0, to zadziała od razu)
-      // jeśli offset było !=0, useEffect odpali load po setOffset(0), ale tu robimy też natychmiastowe odświeżenie
+      // 2) i odśwież listę
       await load();
     } catch (e: any) {
       setMessage({ kind: "err", text: e?.message || "Błąd zapisu" });
@@ -171,23 +206,65 @@ export default function Page() {
   };
 
   const styles = {
-    wrap: { maxWidth: 1100, margin: "40px auto", padding: "0 16px", fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" } as React.CSSProperties,
+    wrap: {
+      maxWidth: 1100,
+      margin: "40px auto",
+      padding: "0 16px",
+      fontFamily:
+        "system-ui, -apple-system, Segoe UI, Roboto, Arial",
+    } as React.CSSProperties,
     h1: { fontSize: 28, marginBottom: 20 } as React.CSSProperties,
-    card: { border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 16, background: "#fff" } as React.CSSProperties,
-    row: { display: "grid", gridTemplateColumns: "160px 1fr", gap: 12, alignItems: "center", marginBottom: 10 } as React.CSSProperties,
+    card: {
+      border: "1px solid #e5e7eb",
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 16,
+      background: "#fff",
+    } as React.CSSProperties,
+    row: {
+      display: "grid",
+      gridTemplateColumns: "160px 1fr",
+      gap: 12,
+      alignItems: "center",
+      marginBottom: 10,
+    } as React.CSSProperties,
     label: { fontWeight: 600, color: "#111827" } as React.CSSProperties,
-    input: { width: "100%", padding: "10px 12px", border: "1px solid #d1d5db", borderRadius: 10 } as React.CSSProperties,
+    input: {
+      width: "100%",
+      padding: "10px 12px",
+      border: "1px solid #d1d5db",
+      borderRadius: 10,
+    } as React.CSSProperties,
     btnRow: { display: "flex", gap: 10, marginTop: 12 } as React.CSSProperties,
-    btn: { padding: "10px 14px", borderRadius: 10, border: "1px solid #111827", background: "#111827", color: "#fff", cursor: "pointer" } as React.CSSProperties,
-    btnGhost: { padding: "10px 14px", borderRadius: 10, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer" } as React.CSSProperties,
+    btn: {
+      padding: "10px 14px",
+      borderRadius: 10,
+      border: "1px solid #111827",
+      background: "#111827",
+      color: "#fff",
+      cursor: "pointer",
+    } as React.CSSProperties,
+    btnGhost: {
+      padding: "10px 14px",
+      borderRadius: 10,
+      border: "1px solid #d1d5db",
+      background: "#fff",
+      cursor: "pointer",
+    } as React.CSSProperties,
     msgOk: { marginTop: 10, color: "#16a34a", fontWeight: 600 } as React.CSSProperties,
     msgErr: { marginTop: 10, color: "#dc2626", fontWeight: 600 } as React.CSSProperties,
-    filterRow: { display: "grid", gridTemplateColumns: "1fr 140px 120px 1fr", gap: 10, alignItems: "center" } as React.CSSProperties,
+    filterRow: {
+      display: "grid",
+      gridTemplateColumns: "1fr 140px 120px 1fr",
+      gap: 10,
+      alignItems: "center",
+    } as React.CSSProperties,
     small: { color: "#6b7280", fontSize: 12, marginTop: 6 } as React.CSSProperties,
     table: { width: "100%", borderCollapse: "collapse" as const, marginTop: 12 } as React.CSSProperties,
     th: { textAlign: "left" as const, padding: 10, borderBottom: "1px solid #e5e7eb", color: "#111827" } as React.CSSProperties,
     td: { padding: 10, borderBottom: "1px solid #f3f4f6", verticalAlign: "top" as const } as React.CSSProperties,
     pill: { fontSize: 12, padding: "2px 8px", borderRadius: 999, border: "1px solid #e5e7eb", color: "#374151" } as React.CSSProperties,
+    code: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 } as React.CSSProperties,
   };
 
   return (
@@ -239,6 +316,10 @@ export default function Page() {
 
         {message?.kind === "ok" && <div style={styles.msgOk}>{message.text}</div>}
         {message?.kind === "err" && <div style={styles.msgErr}>Error: {message.text}</div>}
+
+        <div style={styles.small}>
+          API_BASE_URL: <span style={styles.code}>{API_BASE_URL || "(relative)"}</span>
+        </div>
       </div>
 
       <div style={styles.card}>
@@ -255,45 +336,34 @@ export default function Page() {
             placeholder="np. AAPL, TSLA"
           />
 
-          <select style={styles.input} value={limit} onChange={(e) => { setOffset(0); setLimit(Number(e.target.value)); }}>
+          <select
+            style={styles.input}
+            value={limit}
+            onChange={(e) => {
+              setOffset(0);
+              setLimit(Number(e.target.value));
+            }}
+          >
             {[10, 25, 50, 100].map((n) => (
               <option key={n} value={n}>{n}</option>
             ))}
           </select>
 
+          <input
+            style={styles.input}
+            type="number"
+            value={offset}
+            onChange={(e) => setOffset(Number(e.target.value))}
+          />
+
           <button style={styles.btnGhost} onClick={load} disabled={loading}>
-            {loading ? "Loading..." : "Refresh"}
+            {loading ? "Loading..." : "Reload"}
           </button>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button
-              style={styles.btnGhost}
-              onClick={() => setOffset((o) => Math.max(0, o - limit))}
-              disabled={offset === 0 || loading}
-            >
-              Prev
-            </button>
-            <span style={{ alignSelf: "center", color: "#6b7280" }}>offset: {offset}</span>
-            <button
-              style={styles.btnGhost}
-              onClick={() => setOffset((o) => o + limit)}
-              disabled={loading}
-            >
-              Next
-            </button>
-          </div>
         </div>
 
         <div style={styles.small}>
-          Możesz wpisać: <span style={styles.pill}>AAPL, TSLA</span> albo <span style={styles.pill}>AAPL TSLA</span> albo{" "}
-          <span style={styles.pill}>AAPL/TSLA</span> albo <span style={styles.pill}>AAPL;TSLA</span>
+          Last query: <span style={styles.code}>{lastQuery || "(none)"}</span>
         </div>
-
-        <div style={styles.small}>
-          Query: <code>{lastQuery || buildListUrl()}</code>
-        </div>
-
-        <div style={{ marginTop: 12, fontWeight: 700 }}>News list</div>
 
         <table style={styles.table}>
           <thead>
@@ -304,38 +374,32 @@ export default function Page() {
               <th style={styles.th}>Published</th>
               <th style={styles.th}>Impact</th>
               <th style={styles.th}>Category</th>
-              <th style={styles.th}>URL</th>
-              <th style={styles.th}>Created</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td style={styles.td}><span style={styles.pill}>{r.ticker}</span></td>
+                <td style={styles.td}>
+                  <div style={{ fontWeight: 600 }}>{r.title}</div>
+                  {r.url ? (
+                    <a href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+                      {r.url}
+                    </a>
+                  ) : null}
+                </td>
+                <td style={styles.td}>{r.source || ""}</td>
+                <td style={styles.td}>{toLocalDateTime(r.published_at)}</td>
+                <td style={styles.td}>{r.impact_score ?? ""}</td>
+                <td style={styles.td}>{r.category ?? ""}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
               <tr>
-                <td style={styles.td} colSpan={8}>
-                  {loading ? "Ładowanie..." : "Brak wyników"}
+                <td style={styles.td} colSpan={6}>
+                  {loading ? "Loading..." : "Brak danych"}
                 </td>
               </tr>
-            ) : (
-              rows.map((r) => (
-                <tr key={r.id}>
-                  <td style={{ ...styles.td, fontWeight: 700 }}>{r.ticker}</td>
-                  <td style={styles.td}>{r.title}</td>
-                  <td style={styles.td}>{r.source ?? ""}</td>
-                  <td style={styles.td}>{toLocalDateTime(r.published_at)}</td>
-                  <td style={styles.td}>{r.impact_score ?? ""}</td>
-                  <td style={styles.td}>{r.category ?? ""}</td>
-                  <td style={styles.td}>
-                    {r.url ? (
-                      <a href={r.url} target="_blank" rel="noreferrer">
-                        open
-                      </a>
-                    ) : (
-                      ""
-                    )}
-                  </td>
-                  <td style={styles.td}>{toLocalDateTime(r.created_at)}</td>
-                </tr>
-              ))
             )}
           </tbody>
         </table>
