@@ -1,26 +1,54 @@
-import type { NextConfig } from "next";
+name: Deploy Next.js site to Pages
 
-const repoName = "Gielda-MPV";
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
 
-// Vercel zawsze ustawia env: VERCEL=1 w build/runtime
-const isVercel = process.env.VERCEL === "1";
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
-// Ten przełącznik ustawimy TYLKO w GitHub Actions (Pages)
-const isGitHubPages = !isVercel && process.env.GITHUB_PAGES === "true";
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
-const nextConfig: NextConfig = {
-  // GitHub Pages: statyczny export + ścieżka pod repo subpath
-  ...(isGitHubPages
-    ? {
-        output: "export",
-        basePath: `/${repoName}`,
-        assetPrefix: `/${repoName}/`,
-        images: { unoptimized: true },
-      }
-    : {
-        // Vercel: normalny Next (API działa), bez basePath
-        images: { unoptimized: true }, // możesz potem zmienić na false jeśli chcesz optymalizację
-      }),
-};
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-export default nextConfig;
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Build (GitHub Pages export)
+        env:
+          GITHUB_PAGES: "true"
+        run: npm run build
+        working-directory: app
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/out
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
