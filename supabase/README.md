@@ -4,11 +4,10 @@
 
 ```
 pg_cron (co 15 min)
-  └── net.http_post(fetch-espi URL)
-        └── Edge Function: fetch-espi
-              └── INSERT INTO raw_ingest
-                    └── (future) processor → company_events
-                          └── Next.js frontend (RLS anon read)
+  ├── net.http_post(fetch-espi URL)   → INSERT INTO raw_ingest (source='espi')
+  └── net.http_post(fetch-email URL)  → INSERT INTO raw_ingest (source='email')
+                                            └── (future) processor → company_events
+                                                  └── Next.js frontend (RLS anon read)
 ```
 
 `/api/news` (Next.js) = **manual/external gateway** — wyłączony w MVP (`ENABLE_PUBLIC_INGEST=false`).
@@ -18,159 +17,87 @@ pg_cron (co 15 min)
 ## Wymagania
 
 - Supabase CLI: `brew install supabase/tap/supabase`
-- Projekt Supabase: znaj swój `<project-ref>` (z URL: `https://supabase.com/dashboard/project/<ref>`)
-- Zmienne środowiskowe: patrz `.env.example` w root repo
+- Projekt ref: `pftgmorsthoezhmojjpg`
+- Logowanie: `supabase login` (raz)
+- Link: `supabase link --project-ref pftgmorsthoezhmojjpg` (raz)
 
 ---
 
-## Krok 1 — Migracja DB
+## Deploy workflow (3 komendy)
 
-Otwórz **Supabase Dashboard → SQL Editor → New query**, wklej zawartość:
+### 1. Ustaw sekrety (raz)
 
-```
-supabase/migrations/0001_init.sql
-```
-
-Następnie uruchom i sprawdź:
-
-```sql
-SELECT table_name FROM information_schema.tables
-WHERE table_schema = 'public'
-  AND table_name IN ('raw_ingest', 'company_events', 'news', 'tickers', 'news_audit');
+```bash
+# Gmail IMAP — fetch-email
+supabase secrets set \
+  GMAIL_EMAIL=gielda.monitor.inbox@gmail.com \
+  GMAIL_APP_PASSWORD=<app-password-z-SECRETS.txt> \
+  --project-ref pftgmorsthoezhmojjpg
 ```
 
-Oczekiwany output: 5 wierszy (lub mniej jeśli część tabel już istnieje).
+`SUPABASE_URL` i `SUPABASE_SERVICE_ROLE_KEY` są wstrzykiwane przez Supabase automatycznie.
 
-**Dodatkowe migracje (uruchom jeśli nie wykonano wcześniej):**
+### 2. Deploy Edge Functions
 
-```sql
--- Etap 5: audit trail
-CREATE TABLE IF NOT EXISTS news_audit (
-  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  action      text        NOT NULL,
-  news_id     uuid        REFERENCES news(id) ON DELETE SET NULL,
-  request_id  text        NOT NULL,
-  ip          text        NOT NULL DEFAULT '',
-  user_agent  text,
-  ticker      text,
-  status_code integer     NOT NULL,
-  created_at  timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS news_audit_ticker_idx     ON news_audit (ticker);
-CREATE INDEX IF NOT EXISTS news_audit_created_at_idx ON news_audit (created_at DESC);
-CREATE INDEX IF NOT EXISTS news_audit_request_id_idx ON news_audit (request_id);
-
--- Etap 6: soft delete
-ALTER TABLE news ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
-CREATE INDEX IF NOT EXISTS news_not_deleted_idx
-  ON news (created_at DESC) WHERE deleted_at IS NULL;
+```bash
+supabase functions deploy fetch-espi  --project-ref pftgmorsthoezhmojjpg
+supabase functions deploy fetch-email --project-ref pftgmorsthoezhmojjpg
 ```
+
+### 3. Migracja z cron jobem
+
+```bash
+# Podstaw service_role key → wykonaj migration SQL
+export SERVICE_ROLE_KEY="eyJ..."   # Settings → API → service_role key
+
+sed "s/SERVICE_ROLE_KEY_HERE/$SERVICE_ROLE_KEY/" \
+    supabase/migrations/0003_email_automation.sql \
+  | supabase db execute --project-ref pftgmorsthoezhmojjpg
+```
+
+> Plik `0003_email_automation.sql` jest commitowany z placeholderem `SERVICE_ROLE_KEY_HERE`.
+> `sed` podstawia prawdziwy klucz lokalnie — **klucz nie trafia do git**.
 
 ---
 
-## Krok 2 — Deploy Edge Functions
+## Migracje DB
+
+| Plik | Zawartość | Status |
+|---|---|---|
+| `0001_init.sql` | raw_ingest, company_events, news, tickers, news_audit, soft-delete | ✅ wykonano |
+| `0003_email_automation.sql` | pg_cron job dla fetch-email | deploy → krok 3 powyżej |
+
+Jeśli `0001_init.sql` nie był jeszcze wykonany, wklej go ręcznie w **Dashboard → SQL Editor → New query**.
+
+---
+
+## Weryfikacja po deploy
 
 ```bash
-# Zaloguj się do Supabase CLI
-supabase login
-
-# Link projektu (raz)
-supabase link --project-ref <project-ref>
-
-# Deploy obu funkcji
-supabase functions deploy fetch-espi  --project-ref <project-ref>
-supabase functions deploy fetch-email --project-ref <project-ref>
-```
-
-### Zmienne środowiskowe funkcji
-
-```bash
-# CRON_SECRET — autoryzacja pg_cron → Edge Function
-supabase secrets set CRON_SECRET=<losowy-sekret-min-32-znaki> --project-ref <project-ref>
-
-# Gmail IMAP — dla fetch-email (Checkpoint 3.6)
-supabase secrets set GMAIL_EMAIL=gielda.monitor.inbox@gmail.com --project-ref <project-ref>
-supabase secrets set GMAIL_APP_PASSWORD=<app-password-z-SECRETS.txt> --project-ref <project-ref>
-```
-
-`SUPABASE_URL` i `SUPABASE_SERVICE_ROLE_KEY` są automatycznie dostępne wewnątrz funkcji.
-
-### Weryfikacja ręczna
-
-```bash
-# fetch-espi (stub)
+# Test fetch-espi (stub)
 supabase functions invoke fetch-espi \
-  --project-ref <project-ref> \
-  --headers '{"Authorization":"Bearer <CRON_SECRET>"}'
+  --project-ref pftgmorsthoezhmojjpg
 # → {"ok":true,"inserted":2,"source":"espi","ts":"2026-..."}
 
-# fetch-email (wymaga Gmail secrets)
+# Test fetch-email
 supabase functions invoke fetch-email \
-  --project-ref <project-ref> \
-  --headers '{"Authorization":"Bearer <CRON_SECRET>"}'
+  --project-ref pftgmorsthoezhmojjpg
 # → {"ok":true,"inserted":<n>,"source":"email","ts":"2026-..."}
+# (inserted:0 gdy brak nowych maili — to OK)
 ```
 
-Sprawdź w DB:
+Sprawdź rekordy w DB:
+
 ```sql
-SELECT id, source, payload->>'ticker' AS ticker, fetched_at
+SELECT source, payload->>'ticker' AS ticker, fetched_at
 FROM raw_ingest
 ORDER BY fetched_at DESC
 LIMIT 10;
 ```
 
----
-
-## Krok 3 — Cron Job (pg_cron)
-
-Otwórz **Supabase Dashboard → SQL Editor** i uruchom:
+Sprawdź cron job:
 
 ```sql
--- Włącz pg_cron (raz, jeśli nie ma)
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-
--- Włącz pg_net (raz, jeśli nie ma)
-CREATE EXTENSION IF NOT EXISTS pg_net;
-
--- Utwórz cron job: co 15 minut wywołuje fetch-espi
-SELECT cron.schedule(
-  'fetch-espi-every-15min',                          -- nazwa (unikalna)
-  '*/15 * * * *',                                    -- co 15 min
-  $$
-  SELECT net.http_post(
-    url     := 'https://<project-ref>.supabase.co/functions/v1/fetch-espi',
-    headers := jsonb_build_object(
-      'Content-Type',  'application/json',
-      'Authorization', 'Bearer <CRON_SECRET>'
-    ),
-    body    := '{}'::jsonb
-  );
-  $$
-);
-
--- Utwórz cron job: co 15 minut wywołuje fetch-email (Checkpoint 3.6)
-SELECT cron.schedule(
-  'fetch-email-every-15min',                         -- nazwa (unikalna)
-  '*/15 * * * *',                                    -- co 15 min
-  $$
-  SELECT net.http_post(
-    url     := 'https://<project-ref>.supabase.co/functions/v1/fetch-email',
-    headers := jsonb_build_object(
-      'Content-Type',  'application/json',
-      'Authorization', 'Bearer <CRON_SECRET>'
-    ),
-    body    := '{}'::jsonb
-  );
-  $$
-);
-```
-
-Zastąp `<project-ref>` i `<CRON_SECRET>` właściwymi wartościami.
-
-### Weryfikacja crona
-
-```sql
--- Lista zaplanowanych jobów
 SELECT jobid, jobname, schedule, active FROM cron.job;
 
 -- Logi wykonań (ostatnie 10)
@@ -180,47 +107,26 @@ ORDER BY start_time DESC
 LIMIT 10;
 ```
 
-### Zatrzymanie / usunięcie crona
-
-```sql
--- Dezaktywuj (nie usuwa)
-UPDATE cron.job SET active = false WHERE jobname = 'fetch-espi-every-15min';
-UPDATE cron.job SET active = false WHERE jobname = 'fetch-email-every-15min';
-
--- Usuń całkowicie
-SELECT cron.unschedule('fetch-espi-every-15min');
-SELECT cron.unschedule('fetch-email-every-15min');
-```
-
----
-
-## Krok 4 — Weryfikacja end-to-end
-
-Po pierwszym wykonaniu crona (lub ręcznym invoke):
-
-```sql
--- raw_ingest ma nowe rekordy?
-SELECT source, payload->>'ticker' AS ticker, fetched_at
-FROM raw_ingest
-ORDER BY fetched_at DESC
-LIMIT 10;
-
--- audit trail działa?
-SELECT action, ticker, status_code, created_at
-FROM news_audit
-ORDER BY created_at DESC
-LIMIT 10;
-```
-
 ---
 
 ## Logi Edge Functions
 
-Dashboard → Edge Functions → fetch-espi → Logs
-
-Lub przez CLI:
 ```bash
-supabase functions logs fetch-espi --project-ref <project-ref>
+supabase functions logs fetch-email --project-ref pftgmorsthoezhmojjpg
+supabase functions logs fetch-espi  --project-ref pftgmorsthoezhmojjpg
+```
+
+---
+
+## Zatrzymanie / usunięcie cron jobów
+
+```sql
+-- Dezaktywuj (nie usuwa)
+UPDATE cron.job SET active = false WHERE jobname IN ('fetch-espi-every-15min', 'fetch-email-every-15min');
+
+-- Usuń całkowicie
+SELECT cron.unschedule('fetch-espi-every-15min');
+SELECT cron.unschedule('fetch-email-every-15min');
 ```
 
 ---
