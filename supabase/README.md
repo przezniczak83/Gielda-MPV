@@ -68,7 +68,7 @@ CREATE INDEX IF NOT EXISTS news_not_deleted_idx
 
 ---
 
-## Krok 2 — Deploy Edge Function
+## Krok 2 — Deploy Edge Functions
 
 ```bash
 # Zaloguj się do Supabase CLI
@@ -77,16 +77,20 @@ supabase login
 # Link projektu (raz)
 supabase link --project-ref <project-ref>
 
-# Deploy funkcji
-supabase functions deploy fetch-espi --project-ref <project-ref>
+# Deploy obu funkcji
+supabase functions deploy fetch-espi  --project-ref <project-ref>
+supabase functions deploy fetch-email --project-ref <project-ref>
 ```
 
 ### Zmienne środowiskowe funkcji
 
-W Dashboard → Edge Functions → fetch-espi → Secrets **lub** przez CLI:
-
 ```bash
+# CRON_SECRET — autoryzacja pg_cron → Edge Function
 supabase secrets set CRON_SECRET=<losowy-sekret-min-32-znaki> --project-ref <project-ref>
+
+# Gmail IMAP — dla fetch-email (Checkpoint 3.6)
+supabase secrets set GMAIL_EMAIL=gielda.monitor.inbox@gmail.com --project-ref <project-ref>
+supabase secrets set GMAIL_APP_PASSWORD=<app-password-z-SECRETS.txt> --project-ref <project-ref>
 ```
 
 `SUPABASE_URL` i `SUPABASE_SERVICE_ROLE_KEY` są automatycznie dostępne wewnątrz funkcji.
@@ -94,19 +98,25 @@ supabase secrets set CRON_SECRET=<losowy-sekret-min-32-znaki> --project-ref <pro
 ### Weryfikacja ręczna
 
 ```bash
+# fetch-espi (stub)
 supabase functions invoke fetch-espi \
   --project-ref <project-ref> \
   --headers '{"Authorization":"Bearer <CRON_SECRET>"}'
-```
+# → {"ok":true,"inserted":2,"source":"espi","ts":"2026-..."}
 
-Oczekiwany output:
-```json
-{"ok":true,"inserted":2,"source":"espi","ts":"2026-..."}
+# fetch-email (wymaga Gmail secrets)
+supabase functions invoke fetch-email \
+  --project-ref <project-ref> \
+  --headers '{"Authorization":"Bearer <CRON_SECRET>"}'
+# → {"ok":true,"inserted":<n>,"source":"email","ts":"2026-..."}
 ```
 
 Sprawdź w DB:
 ```sql
-SELECT id, source, fetched_at FROM raw_ingest ORDER BY fetched_at DESC LIMIT 5;
+SELECT id, source, payload->>'ticker' AS ticker, fetched_at
+FROM raw_ingest
+ORDER BY fetched_at DESC
+LIMIT 10;
 ```
 
 ---
@@ -137,6 +147,22 @@ SELECT cron.schedule(
   );
   $$
 );
+
+-- Utwórz cron job: co 15 minut wywołuje fetch-email (Checkpoint 3.6)
+SELECT cron.schedule(
+  'fetch-email-every-15min',                         -- nazwa (unikalna)
+  '*/15 * * * *',                                    -- co 15 min
+  $$
+  SELECT net.http_post(
+    url     := 'https://<project-ref>.supabase.co/functions/v1/fetch-email',
+    headers := jsonb_build_object(
+      'Content-Type',  'application/json',
+      'Authorization', 'Bearer <CRON_SECRET>'
+    ),
+    body    := '{}'::jsonb
+  );
+  $$
+);
 ```
 
 Zastąp `<project-ref>` i `<CRON_SECRET>` właściwymi wartościami.
@@ -159,9 +185,11 @@ LIMIT 10;
 ```sql
 -- Dezaktywuj (nie usuwa)
 UPDATE cron.job SET active = false WHERE jobname = 'fetch-espi-every-15min';
+UPDATE cron.job SET active = false WHERE jobname = 'fetch-email-every-15min';
 
 -- Usuń całkowicie
 SELECT cron.unschedule('fetch-espi-every-15min');
+SELECT cron.unschedule('fetch-email-every-15min');
 ```
 
 ---
