@@ -1,0 +1,31 @@
+ticker,name,sector,market,has_subsidiaries
+PKN,PKN Orlen,Energy,GPW,TRUE
+PZU,PZU SA,Insurance,GPW,TRUE
+KGHM,KGHM Polska Miedź,Mining,GPW,TRUE
+PKO,PKO Bank Polski,Banking,GPW,TRUE
+PGE,PGE SA,Energy,GPW,TRUE
+CCC,CCC SA,Retail,GPW,FALSE
+CDR,CD Projekt,Gaming,GPW,FALSE
+ACP,Asseco Poland,Technology,GPW,TRUE
+ALR,Alior Bank,Banking,GPW,FALSE
+MBK,mBank,Banking,GPW,FALSE
+LPP,LPP SA,Retail,GPW,FALSE
+JSW,JSW SA,Mining,GPW,FALSE
+DNP,Dino Polska,Retail,GPW,FALSE
+ALE,Allegro,E-commerce,GPW,FALSE
+SPL,Shoper,E-commerce,GPW,FALSE
+VRG,Vercom,Technology,GPW,FALSE
+TXT,Text,AI/NLP,GPW,FALSE
+SFG,Spyrosoft,IT Services,GPW,FALSE
+KER,Kernel,Agriculture,GPW,FALSE
+OPL,Orange Polska,Telecom,GPW,FALSE
+AAPL,Apple Inc,Technology,USA,TRUE
+MSFT,Microsoft,Technology,USA,TRUE
+GOOGL,Google,Technology,USA,TRUE
+AMZN,Amazon,E-commerce,USA,TRUE
+TSLA,Tesla,Automotive,USA,FALSE
+NVDA,NVIDIA,Semiconductors,USA,FALSE
+META,Meta,Social Media,USA,FALSE
+V,Visa,Payments,USA,FALSE
+MA,Mastercard,Payments,USA,FALSE
+PYPL,PayPal,Payments,USA,FALSE

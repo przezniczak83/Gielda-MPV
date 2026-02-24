@@ -53,8 +53,16 @@ ALTER TABLE raw_ingest     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE company_events ENABLE ROW LEVEL SECURITY;
 
 -- Anon może czytać company_events (frontend)
-CREATE POLICY IF NOT EXISTS "anon_read_company_events"
-  ON company_events FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'company_events'
+      AND policyname = 'anon_read_company_events'
+  ) THEN
+    CREATE POLICY "anon_read_company_events"
+      ON company_events FOR SELECT TO anon USING (true);
+  END IF;
+END; $$;
 
 -- Anon NIE może czytać raw_ingest (staging, wewnętrzny)
 -- (brak polityki SELECT dla anon = brak dostępu)
