@@ -29,3 +29,23 @@ META,Meta,Social Media,USA,FALSE
 V,Visa,Payments,USA,FALSE
 MA,Mastercard,Payments,USA,FALSE
 PYPL,PayPal,Payments,USA,FALSE
+PKP,PKP Cargo,Transport,GPW,TRUE
+ING,ING Bank Śląski,Banking,GPW,FALSE
+BNP,BNP Paribas Bank Polska,Banking,GPW,FALSE
+KTY,Grupa Kęty,Manufacturing,GPW,TRUE
+AMC,Amica,Manufacturing,GPW,TRUE
+MOL,MOL Group,Energy,GPW,TRUE
+PGN,PGNiG,Energy,GPW,TRUE
+TPE,Tauron,Energy,GPW,TRUE
+ENA,Energa,Energy,GPW,TRUE
+GTC,GTC SA,Real Estate,GPW,TRUE
+PHN,PHN SA,Real Estate,GPW,FALSE
+DOM,Dom Development,Real Estate,GPW,FALSE
+TEN,Ten Square Games,Gaming,GPW,FALSE
+PLW,PlayWay,Gaming,GPW,FALSE
+11B,11 bit studios,Gaming,GPW,FALSE
+CMR,Comarch,Technology,GPW,TRUE
+BDX,Budimex,Construction,GPW,TRUE
+MRC,Mercator Medical,Healthcare,GPW,FALSE
+WSE,Warsaw Stock Exchange,Finance,GPW,FALSE
+SNK,Sanok Rubber Company,Manufacturing,GPW,FALSE
