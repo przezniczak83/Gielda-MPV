@@ -1,14 +1,73 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import PriceChart       from "./PriceChart";
-import FinancialKpis    from "./FinancialKpis";
-import AiChat           from "./AiChat";
-import ConsensusWidget  from "./ConsensusWidget";
-import ForecastWidget   from "./ForecastWidget";
-import PeerComparison  from "./PeerComparison";
-import OwnershipWidget from "./OwnershipWidget";
-import MoatWidget      from "./MoatWidget";
+import dynamic from "next/dynamic";
+
+// ── Lazy-loaded heavy components ─────────────────────────────────────────────
+
+const PriceChart = dynamic(
+  () => import("./PriceChart"),
+  {
+    loading: () => <div className="h-[180px] bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
+const FinancialKpis = dynamic(
+  () => import("./FinancialKpis"),
+  {
+    loading: () => <div className="h-48 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
+const MoatWidget = dynamic(
+  () => import("./MoatWidget"),
+  {
+    loading: () => <div className="h-32 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
+const ForecastWidget = dynamic(
+  () => import("./ForecastWidget"),
+  {
+    loading: () => <div className="h-32 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
+const ConsensusWidget = dynamic(
+  () => import("./ConsensusWidget"),
+  {
+    loading: () => <div className="h-24 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
+const PeerComparison = dynamic(
+  () => import("./PeerComparison"),
+  {
+    loading: () => <div className="h-32 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
+const OwnershipWidget = dynamic(
+  () => import("./OwnershipWidget"),
+  {
+    loading: () => <div className="h-24 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
+const AiChat = dynamic(
+  () => import("./AiChat"),
+  {
+    loading: () => <div className="h-48 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
 
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
@@ -88,7 +147,6 @@ export default function CompanyTabs({
         body:    JSON.stringify({ ticker }),
       });
       setLastRefresh(new Date().toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }));
-      // Force FinancialKpis to reload by toggling a key — simplest approach
       window.dispatchEvent(new CustomEvent("kpis-refreshed", { detail: { ticker } }));
     } finally {
       setRefreshing(false);
@@ -147,16 +205,13 @@ export default function CompanyTabs({
       {/* Tab panels */}
       {activeTab === "Przegląd" && (
         <div className="space-y-6">
-          {/* Price chart */}
           <div>
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
               Wykres cen (30 dni)
             </h2>
             <PriceChart ticker={ticker} />
           </div>
-          {/* Health score + red flags (overview section of FinancialKpis) */}
           <HealthOverview ticker={ticker} />
-          {/* Institutional ownership */}
           <OwnershipWidget ticker={ticker} />
         </div>
       )}
