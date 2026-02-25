@@ -1,21 +1,21 @@
 // supabase/functions/fetch-prices/index.ts
-// Pobiera historyczne ceny akcji z Yahoo Finance i upsertuje do price_history.
+// Hybrid price fetcher with multi-source fallback chain.
 //
-// Stooq blokuje Edge Functions (brak sesji/cookies) — zastąpiony Yahoo Finance.
-// Yahoo Finance URL:
-//   GPW: https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.WA?interval=1d&range=30d
-//   USA: https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=30d
+// GPW chain:  Twelve Data → EODHD → Stooq → Yahoo Finance
+// USA chain:  FMP → Twelve Data → Alpha Vantage → Yahoo Finance
 //
-// Max 5 spółek per run, sleep 500ms między requestami.
+// Each source is tried in order; first one returning rows wins.
+// source field stored in price_history for diagnostics.
+//
 // Deploy: supabase functions deploy fetch-prices --project-ref pftgmorsthoezhmojjpg
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface PriceRow {
-  ticker: string;
-  date:   string;   // YYYY-MM-DD
+/** Raw OHLCV record returned by individual fetchers (no ticker/source yet). */
+interface OHLCV {
+  date:   string;        // YYYY-MM-DD
   open:   number | null;
   high:   number | null;
   low:    number | null;
@@ -23,115 +23,304 @@ interface PriceRow {
   volume: number | null;
 }
 
-interface YahooQuote {
-  open:   (number | null)[];
-  high:   (number | null)[];
-  low:    (number | null)[];
-  close:  (number | null)[];
-  volume: (number | null)[];
+/** Full row ready for upsert into price_history. */
+interface PriceRow extends OHLCV {
+  ticker: string;
+  source: string;
 }
 
-interface YahooResult {
-  timestamp:  number[];
-  indicators: { quote: YahooQuote[] };
-}
-
-interface YahooResponse {
-  chart: {
-    result: YahooResult[] | null;
-    error:  { code: string; description: string } | null;
-  };
-}
+type FetcherFn = (ticker: string) => Promise<OHLCV[]>;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MAX_TICKERS_PER_RUN = 5;
-const SLEEP_MS            = 500;
+const MAX_TICKERS_PER_RUN  = 5;
+const SLEEP_BETWEEN_TICKERS = 300;   // ms
+const SLEEP_BETWEEN_SOURCES = 500;   // ms — between failed source attempts
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-/** Yahoo Finance symbol: GPW tickers get .WA suffix, USA tickers are used as-is. */
-function toYahooSymbol(ticker: string, market: string): string {
-  return market === "GPW" ? `${ticker}.WA` : ticker;
-}
-
-/** Convert Unix timestamp (seconds) to YYYY-MM-DD string. */
 function tsToDate(ts: number): string {
   return new Date(ts * 1000).toISOString().slice(0, 10);
 }
 
-/**
- * Fetches and parses Yahoo Finance chart data for a ticker.
- * Returns array of PriceRow for the last 30 days.
- */
-async function fetchYahooPrices(ticker: string, market: string): Promise<PriceRow[]> {
-  const symbol = toYahooSymbol(ticker, market);
-  const url    = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=30d`;
+function parseNum(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : parseFloat(String(v));
+  return isNaN(n) ? null : n;
+}
 
-  console.log(`[fetch-prices] Fetching ${url}`);
+function parseInt_(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? Math.round(v) : Number.parseInt(String(v), 10);
+  return isNaN(n) ? null : n;
+}
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept":     "application/json",
-      },
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[fetch-prices] ${ticker}: network error: ${msg}`);
+const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// ─── Twelve Data (GPW: {ticker}.WAR, USA: {ticker}) ──────────────────────────
+
+async function fetchTwelveDataGPW(ticker: string): Promise<OHLCV[]> {
+  const key = Deno.env.get("TWELVE_DATA_KEY") ?? "";
+  if (!key) throw new Error("TWELVE_DATA_KEY not set");
+
+  const url = `https://api.twelvedata.com/time_series?symbol=${ticker}.WAR&interval=1day&outputsize=30&apikey=${key}`;
+  return fetchTwelveData(url);
+}
+
+async function fetchTwelveDataUSA(ticker: string): Promise<OHLCV[]> {
+  const key = Deno.env.get("TWELVE_DATA_KEY") ?? "";
+  if (!key) throw new Error("TWELVE_DATA_KEY not set");
+
+  const url = `https://api.twelvedata.com/time_series?symbol=${ticker}&interval=1day&outputsize=30&apikey=${key}`;
+  return fetchTwelveData(url);
+}
+
+async function fetchTwelveData(url: string): Promise<OHLCV[]> {
+  const res  = await fetch(url, { headers: { "User-Agent": BROWSER_UA } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json() as {
+    values?: Array<{ datetime: string; open: string; high: string; low: string; close: string; volume: string }>;
+    code?:   number;
+    message?: string;
+    status?:  string;
+  };
+
+  // Twelve Data returns {code: 400, message: "..."} for unknown symbols
+  if (data.code || data.status === "error") {
+    throw new Error(data.message ?? "Twelve Data error");
+  }
+  if (!data.values?.length) return [];
+
+  return data.values.map(v => ({
+    date:   v.datetime.slice(0, 10),
+    open:   parseNum(v.open),
+    high:   parseNum(v.high),
+    low:    parseNum(v.low),
+    close:  parseNum(v.close),
+    volume: parseInt_(v.volume),
+  }));
+}
+
+// ─── EODHD (GPW: {ticker}.WAR) ───────────────────────────────────────────────
+
+async function fetchEODHD(ticker: string): Promise<OHLCV[]> {
+  const key = Deno.env.get("EODHD_KEY") ?? "";
+  if (!key) throw new Error("EODHD_KEY not set");
+
+  const url = `https://eodhd.com/api/eod/${ticker}.WAR?api_token=${key}&fmt=json&limit=30`;
+  const res  = await fetch(url, { headers: { "User-Agent": BROWSER_UA } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json() as Array<{
+    date: string; open: number; high: number; low: number; close: number; volume: number;
+  }>;
+
+  if (!Array.isArray(data) || data.length === 0) return [];
+
+  return data.map(v => ({
+    date:   v.date.slice(0, 10),
+    open:   parseNum(v.open),
+    high:   parseNum(v.high),
+    low:    parseNum(v.low),
+    close:  parseNum(v.close),
+    volume: parseInt_(v.volume),
+  }));
+}
+
+// ─── Stooq (GPW: {ticker}.pl) — may block EF IPs ────────────────────────────
+
+async function fetchStooq(ticker: string): Promise<OHLCV[]> {
+  const url  = `https://stooq.pl/q/d/l/?s=${ticker.toLowerCase()}.pl&i=d`;
+  const res  = await fetch(url, { headers: { "User-Agent": BROWSER_UA } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const text    = (await res.text()).trim();
+  const lower   = text.toLowerCase();
+  if (!text || lower.startsWith("no data") || lower.startsWith("brak danych")) {
     return [];
   }
 
-  if (!res.ok) {
-    console.warn(`[fetch-prices] ${ticker}: HTTP ${res.status}`);
-    return [];
+  // CSV: Date,Open,High,Low,Close,Volume
+  const lines  = text.split("\n").slice(1);
+  const rows: OHLCV[] = [];
+
+  for (const line of lines) {
+    const [date, open, high, low, close, volume] = line.trim().split(",");
+    if (!date || date === "null") continue;
+    const c = parseNum(close);
+    if (c === null) continue;
+    rows.push({ date, open: parseNum(open), high: parseNum(high), low: parseNum(low), close: c, volume: parseInt_(volume) });
   }
-
-  let data: YahooResponse;
-  try {
-    data = await res.json() as YahooResponse;
-  } catch {
-    console.warn(`[fetch-prices] ${ticker}: invalid JSON response`);
-    return [];
-  }
-
-  if (data.chart.error) {
-    console.warn(`[fetch-prices] ${ticker}: Yahoo error: ${data.chart.error.description}`);
-    return [];
-  }
-
-  const result = data.chart.result?.[0];
-  if (!result || !result.timestamp?.length) {
-    console.warn(`[fetch-prices] ${ticker}: no data in response`);
-    return [];
-  }
-
-  const quote      = result.indicators.quote[0];
-  const timestamps = result.timestamp;
-  const rows: PriceRow[] = [];
-
-  for (let i = 0; i < timestamps.length; i++) {
-    const close = quote.close[i];
-    if (close === null || close === undefined) continue; // skip trading halts
-
-    rows.push({
-      ticker,
-      date:   tsToDate(timestamps[i]),
-      open:   quote.open[i]   ?? null,
-      high:   quote.high[i]   ?? null,
-      low:    quote.low[i]    ?? null,
-      close:  close,
-      volume: quote.volume[i] ?? null,
-    });
-  }
-
   return rows;
+}
+
+// ─── FMP (USA) ────────────────────────────────────────────────────────────────
+
+async function fetchFMP(ticker: string): Promise<OHLCV[]> {
+  const key = Deno.env.get("FMP_KEY") ?? "";
+  if (!key) throw new Error("FMP_KEY not set");
+
+  const url = `https://financialmodelingprep.com/api/v3/historical-price-full/${ticker}?timeseries=30&apikey=${key}`;
+  const res  = await fetch(url, { headers: { "User-Agent": BROWSER_UA } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json() as {
+    historical?: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }>;
+    "Error Message"?: string;
+  };
+
+  if (data["Error Message"]) throw new Error(data["Error Message"]);
+  if (!data.historical?.length) return [];
+
+  return data.historical.map(v => ({
+    date:   v.date.slice(0, 10),
+    open:   parseNum(v.open),
+    high:   parseNum(v.high),
+    low:    parseNum(v.low),
+    close:  parseNum(v.close),
+    volume: parseInt_(v.volume),
+  }));
+}
+
+// ─── Alpha Vantage (USA) ──────────────────────────────────────────────────────
+
+async function fetchAlphaVantage(ticker: string): Promise<OHLCV[]> {
+  const key = Deno.env.get("ALPHA_VANTAGE_KEY") ?? "";
+  if (!key) throw new Error("ALPHA_VANTAGE_KEY not set");
+
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&outputsize=compact&apikey=${key}`;
+  const res  = await fetch(url, { headers: { "User-Agent": BROWSER_UA } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json() as {
+    "Time Series (Daily)"?: Record<string, { "1. open": string; "2. high": string; "3. low": string; "4. close": string; "5. volume": string }>;
+    "Note"?: string;
+    "Information"?: string;
+  };
+
+  // Rate limit messages
+  if (data["Note"] || data["Information"]) {
+    throw new Error(data["Note"] ?? data["Information"]);
+  }
+
+  const series = data["Time Series (Daily)"];
+  if (!series) return [];
+
+  return Object.entries(series)
+    .slice(0, 30)
+    .map(([date, v]) => ({
+      date,
+      open:   parseNum(v["1. open"]),
+      high:   parseNum(v["2. high"]),
+      low:    parseNum(v["3. low"]),
+      close:  parseNum(v["4. close"]),
+      volume: parseInt_(v["5. volume"]),
+    }));
+}
+
+// ─── Yahoo Finance (GPW: .WA, USA: as-is) ────────────────────────────────────
+
+async function fetchYahooGPW(ticker: string): Promise<OHLCV[]> {
+  return fetchYahoo(`${ticker}.WA`);
+}
+
+async function fetchYahooUSA(ticker: string): Promise<OHLCV[]> {
+  return fetchYahoo(ticker);
+}
+
+async function fetchYahoo(symbol: string): Promise<OHLCV[]> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=30d`;
+  const res  = await fetch(url, {
+    headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json() as {
+    chart: {
+      result: Array<{
+        timestamp: number[];
+        indicators: {
+          quote: Array<{
+            open: (number | null)[]; high: (number | null)[];
+            low:  (number | null)[]; close: (number | null)[];
+            volume: (number | null)[];
+          }>;
+        };
+      }> | null;
+      error: { description: string } | null;
+    };
+  };
+
+  if (data.chart.error) throw new Error(data.chart.error.description);
+  const result = data.chart.result?.[0];
+  if (!result?.timestamp?.length) return [];
+
+  const q    = result.indicators.quote[0];
+  const rows: OHLCV[] = [];
+
+  for (let i = 0; i < result.timestamp.length; i++) {
+    const c = q.close[i];
+    if (c === null || c === undefined) continue;
+    rows.push({
+      date:   tsToDate(result.timestamp[i]),
+      open:   q.open[i]   ?? null,
+      high:   q.high[i]   ?? null,
+      low:    q.low[i]    ?? null,
+      close:  c,
+      volume: q.volume[i] ?? null,
+    });
+  }
+  return rows;
+}
+
+// ─── Fallback chain orchestrator ──────────────────────────────────────────────
+
+const GPW_CHAIN: [string, FetcherFn][] = [
+  ["twelve_data", fetchTwelveDataGPW],
+  ["eodhd",       fetchEODHD],
+  ["stooq",       fetchStooq],
+  ["yahoo",       fetchYahooGPW],
+];
+
+const USA_CHAIN: [string, FetcherFn][] = [
+  ["fmp",           fetchFMP],
+  ["twelve_data",   fetchTwelveDataUSA],
+  ["alpha_vantage", fetchAlphaVantage],
+  ["yahoo",         fetchYahooUSA],
+];
+
+async function fetchWithFallback(
+  ticker: string,
+  market: string,
+): Promise<{ rows: OHLCV[]; sourceUsed: string }> {
+  const chain = market === "GPW" ? GPW_CHAIN : USA_CHAIN;
+
+  for (let i = 0; i < chain.length; i++) {
+    const [sourceName, fetcher] = chain[i];
+
+    try {
+      const rows = await fetcher(ticker);
+      if (rows.length > 0) {
+        console.log(`[fetch-prices] ${ticker}: success via ${sourceName} (${rows.length} rows)`);
+        return { rows, sourceUsed: sourceName };
+      }
+      console.log(`[fetch-prices] ${ticker}: ${sourceName} returned 0 rows, trying next`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[fetch-prices] ${ticker}: ${sourceName} failed: ${msg}`);
+    }
+
+    // Brief pause between source attempts (not after last)
+    if (i < chain.length - 1) await sleep(SLEEP_BETWEEN_SOURCES);
+  }
+
+  console.warn(`[fetch-prices] ${ticker}: all sources exhausted, no data`);
+  return { rows: [], sourceUsed: "none" };
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -145,7 +334,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     { auth: { persistSession: false } },
   );
 
-  // ── Pobierz wszystkie spółki (GPW + USA) ──────────────────────────────────
+  // ── Fetch companies ────────────────────────────────────────────────────────
   const { data: companies, error: compErr } = await supabase
     .from("companies")
     .select("ticker, market")
@@ -160,52 +349,60 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   }
 
   const allCompanies = (companies ?? []) as { ticker: string; market: string }[];
-  console.log(`[fetch-prices] Found ${allCompanies.length} companies`);
+  console.log(`[fetch-prices] ${allCompanies.length} companies found`);
 
   if (allCompanies.length === 0) {
     return new Response(
-      JSON.stringify({ ok: true, updated_tickers: [], total_rows: 0, ts: new Date().toISOString() }),
+      JSON.stringify({ ok: true, results: [], total_rows: 0, ts: new Date().toISOString() }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
   }
 
-  // ── Process max 5 companies ────────────────────────────────────────────────
-  const batch          = allCompanies.slice(0, MAX_TICKERS_PER_RUN);
-  const updatedTickers: string[] = [];
-  let   totalRows      = 0;
+  // ── Process batch ──────────────────────────────────────────────────────────
+  const batch = allCompanies.slice(0, MAX_TICKERS_PER_RUN);
+  const results: Array<{ ticker: string; rows_upserted: number; source_used: string }> = [];
+  let totalRows = 0;
 
   for (let i = 0; i < batch.length; i++) {
     const { ticker, market } = batch[i];
+    if (i > 0) await sleep(SLEEP_BETWEEN_TICKERS);
 
-    if (i > 0) await sleep(SLEEP_MS);
-
-    const rows = await fetchYahooPrices(ticker, market);
-    console.log(`[fetch-prices] ${ticker}: got ${rows.length} row(s)`);
-
-    if (rows.length === 0) continue;
-
-    const { error: upsertErr } = await supabase
-      .from("price_history")
-      .upsert(rows, { onConflict: "ticker,date" });
-
-    if (upsertErr) {
-      console.error(`[fetch-prices] ${ticker}: upsert error:`, upsertErr.message);
+    const { rows: ohlcvRows, sourceUsed } = await fetchWithFallback(ticker, market);
+    if (ohlcvRows.length === 0) {
+      results.push({ ticker, rows_upserted: 0, source_used: "none" });
       continue;
     }
 
-    updatedTickers.push(ticker);
-    totalRows += rows.length;
-    console.log(`[fetch-prices] ${ticker} (${toYahooSymbol(ticker, market)}): upserted ${rows.length} rows ✓`);
+    // Attach ticker + source to each row
+    const priceRows: PriceRow[] = ohlcvRows.map(r => ({
+      ...r,
+      ticker,
+      source: sourceUsed,
+    }));
+
+    const { error: upsertErr } = await supabase
+      .from("price_history")
+      .upsert(priceRows, { onConflict: "ticker,date" });
+
+    if (upsertErr) {
+      console.error(`[fetch-prices] ${ticker}: upsert error:`, upsertErr.message);
+      results.push({ ticker, rows_upserted: 0, source_used: sourceUsed });
+      continue;
+    }
+
+    results.push({ ticker, rows_upserted: priceRows.length, source_used: sourceUsed });
+    totalRows += priceRows.length;
+    console.log(`[fetch-prices] ${ticker}: upserted ${priceRows.length} rows (source=${sourceUsed}) ✓`);
   }
 
-  console.log(`[fetch-prices] Done: tickers=${updatedTickers.length} rows=${totalRows}`);
+  console.log(`[fetch-prices] Done: total_rows=${totalRows}`);
 
   return new Response(
     JSON.stringify({
-      ok:              true,
-      updated_tickers: updatedTickers,
-      total_rows:      totalRows,
-      ts:              new Date().toISOString(),
+      ok:         true,
+      results,
+      total_rows: totalRows,
+      ts:         new Date().toISOString(),
     }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
