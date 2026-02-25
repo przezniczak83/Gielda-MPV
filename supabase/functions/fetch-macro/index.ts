@@ -1,12 +1,15 @@
 // supabase/functions/fetch-macro/index.ts
-// Fetches macro-economic indicators from NBP API.
+// Fetches macro-economic indicators from NBP API + FRED API (when key available).
 //
 // Data sources:
-//   NBP API — exchange rates EUR/PLN, USD/PLN (confirmed working endpoints)
-//   NBP API — GBP/PLN, CHF/PLN
+//   NBP API — exchange rates EUR/PLN, USD/PLN, GBP/PLN, CHF/PLN (always)
+//   FRED API — Fed Funds Rate, US CPI, 10Y Treasury, Unemployment (when FRED_API_KEY set)
 //
 // NOTE: NBP endpoints for CPI, WIBOR (/api/cenycen/, /api/stopy/) do NOT exist.
-// FRED API skipped — no FRED_API_KEY configured.
+//
+// To enable FRED:
+//   supabase secrets set FRED_API_KEY=your_key
+//   Free key at: https://fred.stlouisfed.org/docs/api/api_key.html
 //
 // Deploy: supabase functions deploy fetch-macro --project-ref pftgmorsthoezhmojjpg
 
@@ -45,7 +48,6 @@ async function fetchNBPRate(currencyCode: string): Promise<{ current: NBPRate; p
       log.warn(`NBP ${currencyCode} insufficient data`);
       return null;
     }
-    // rates sorted ascending by date — last is most recent
     const rates = data.rates.sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
     return {
       current:  rates[rates.length - 1],
@@ -53,6 +55,51 @@ async function fetchNBPRate(currencyCode: string): Promise<{ current: NBPRate; p
     };
   } catch (err) {
     log.warn(`NBP ${currencyCode} fetch error:`, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+// ─── FRED API fetcher ─────────────────────────────────────────────────────────
+
+interface FREDObservation {
+  date:  string;
+  value: string;   // may be "." when data unavailable
+}
+
+interface FREDResponse {
+  observations: FREDObservation[];
+}
+
+async function fetchFREDSeries(
+  apiKey: string,
+  seriesId: string,
+): Promise<{ current: number; previous: number; date: string } | null> {
+  const url =
+    `https://api.stlouisfed.org/fred/series/observations` +
+    `?series_id=${seriesId}` +
+    `&api_key=${apiKey}` +
+    `&file_type=json` +
+    `&limit=2` +
+    `&sort_order=desc`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      log.warn(`FRED ${seriesId} HTTP ${res.status}`);
+      return null;
+    }
+    const data = await res.json() as FREDResponse;
+    const obs  = (data.observations ?? []).filter(o => o.value !== ".");
+    if (obs.length < 2) {
+      log.warn(`FRED ${seriesId} insufficient valid data`);
+      return null;
+    }
+    return {
+      current:  parseFloat(obs[0].value),
+      previous: parseFloat(obs[1].value),
+      date:     obs[0].date,
+    };
+  } catch (err) {
+    log.warn(`FRED ${seriesId} error:`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -90,49 +137,75 @@ Deno.serve(async (req: Request): Promise<Response> => {
     );
   }
 
-  const currencies = ["EUR", "USD", "GBP", "CHF"];
   const fetched: string[] = [];
   const failed:  string[] = [];
+  const rows: Array<{
+    name: string; value: number; prev_value: number | null;
+    change_pct: number | null; source: string; period: string | null;
+  }> = [];
 
-  const results = await Promise.all(
-    currencies.map(async (code) => {
-      const data = await fetchNBPRate(code);
-      if (!data) {
-        failed.push(code);
-        return null;
-      }
+  // ── NBP exchange rates (always) ────────────────────────────────────────────
+  const currencies = ["EUR", "USD", "GBP", "CHF"];
+  const nbpResults = await Promise.all(currencies.map(code => fetchNBPRate(code)));
 
-      const { current, previous } = data;
-      const pairName   = `${code}/PLN`;
-      const changePct  = previous.mid > 0
-        ? ((current.mid - previous.mid) / previous.mid) * 100
+  for (let i = 0; i < currencies.length; i++) {
+    const code = currencies[i];
+    const data = nbpResults[i];
+    if (!data) { failed.push(`${code}/PLN`); continue; }
+    const { current, previous } = data;
+    const changePct = previous.mid > 0
+      ? parseFloat(((current.mid - previous.mid) / previous.mid * 100).toFixed(4))
+      : null;
+    rows.push({
+      name:       `${code}/PLN`,
+      value:      current.mid,
+      prev_value: previous.mid,
+      change_pct: changePct,
+      source:     "NBP",
+      period:     current.effectiveDate,
+    });
+    fetched.push(`${code}/PLN`);
+  }
+
+  // ── FRED data (when key available) ────────────────────────────────────────
+  const fredKey = Deno.env.get("FRED_API_KEY");
+  if (!fredKey) {
+    log.info("FRED_API_KEY not set — skipping USA macro (see lessons-learned.md for setup)");
+  } else {
+    const FRED_SERIES: Array<{ id: string; name: string; unit: string }> = [
+      { id: "FEDFUNDS", name: "Fed Funds Rate",    unit: "%" },
+      { id: "CPIAUCSL", name: "US CPI (YoY)",      unit: "%" },
+      { id: "DGS10",    name: "US 10Y Treasury",   unit: "%" },
+      { id: "UNRATE",   name: "US Unemployment",   unit: "%" },
+    ];
+
+    const fredResults = await Promise.all(
+      FRED_SERIES.map(s => fetchFREDSeries(fredKey, s.id))
+    );
+
+    for (let i = 0; i < FRED_SERIES.length; i++) {
+      const series = FRED_SERIES[i];
+      const data   = fredResults[i];
+      if (!data) { failed.push(series.name); continue; }
+      const changePct = data.previous > 0
+        ? parseFloat(((data.current - data.previous) / Math.abs(data.previous) * 100).toFixed(4))
         : null;
+      rows.push({
+        name:       series.name,
+        value:      data.current,
+        prev_value: data.previous,
+        change_pct: changePct,
+        source:     "FRED",
+        period:     data.date,
+      });
+      fetched.push(series.name);
+    }
+    log.info(`FRED: fetched ${fredResults.filter(Boolean).length}/${FRED_SERIES.length} series`);
+  }
 
-      return {
-        name:       pairName,
-        value:      current.mid,
-        prev_value: previous.mid,
-        change_pct: changePct !== null ? parseFloat(changePct.toFixed(4)) : null,
-        source:     "NBP",
-        period:     current.effectiveDate,
-      };
-    })
-  );
-
-  const rows = results.filter(Boolean) as Array<{
-    name:       string;
-    value:      number;
-    prev_value: number;
-    change_pct: number | null;
-    source:     string;
-    period:     string;
-  }>;
-
+  // ── Persist ────────────────────────────────────────────────────────────────
   if (rows.length > 0) {
-    const { error } = await supabase
-      .from("macro_indicators")
-      .insert(rows);
-
+    const { error } = await supabase.from("macro_indicators").insert(rows);
     if (error) {
       log.error("Insert error:", error.message);
       return new Response(
@@ -140,19 +213,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         { status: 500, headers: CORS },
       );
     }
-
-    for (const r of rows) fetched.push(r.name);
   }
 
   log.info(`Done. fetched=${fetched.join(",")} failed=${failed.join(",")}`);
 
   return new Response(
-    JSON.stringify({
-      ok:      true,
-      fetched,
-      failed,
-      ts:      new Date().toISOString(),
-    }),
+    JSON.stringify({ ok: true, fetched, failed, ts: new Date().toISOString() }),
     { status: 200, headers: CORS },
   );
 });
