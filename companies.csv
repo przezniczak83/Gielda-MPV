@@ -71,6 +71,33 @@ UNI,Unibep SA,Construction,GPW,TRUE
 TOR,Torpol SA,Construction,GPW,FALSE
 ZWC,Żywiec Group,FMCG,GPW,TRUE
 JPM,JPMorgan Chase,Banking,USA,TRUE
-NFLX,Netflix,Entertainment,USA,FALSE
+NFLX,Netflix,Streaming,USA,FALSE
 AMD,AMD,Semiconductors,USA,FALSE
 BAC,Bank of America,Banking,USA,TRUE
+INK,Inpro SA,Real Estate,GPW,FALSE
+ARG,Argo SA,Manufacturing,GPW,FALSE
+OAT,Oat SA,Agriculture,GPW,FALSE
+CAR,Carint SA,Technology,GPW,FALSE
+MON,Monnari Trade,Retail,GPW,FALSE
+WTN,Wittchen SA,Retail,GPW,FALSE
+CIG,Cigames SA,Gaming,GPW,FALSE
+FSG,Fasing SA,Manufacturing,GPW,FALSE
+KAN,Kancelaria Medius,Legal,GPW,FALSE
+MED,Medicover,Healthcare,GPW,TRUE
+EME,EMEA Medical,Healthcare,GPW,FALSE
+LVC,LiveChat Software,SaaS,GPW,FALSE
+HRP,Huuuge Games,Gaming,GPW,FALSE
+TRK,Trakcion SA,Technology,GPW,FALSE
+BML,Bumble SA,Technology,GPW,FALSE
+APE,Apator SA,Manufacturing,GPW,TRUE
+ZEP,Zpue SA,Manufacturing,GPW,FALSE
+GKI,Getin Noble Bank,Banking,GPW,FALSE
+SPOT,Spotify,Streaming,USA,FALSE
+CRM,Salesforce,SaaS,USA,TRUE
+NOW,ServiceNow,SaaS,USA,FALSE
+SNOW,Snowflake,Data/Cloud,USA,FALSE
+PLTR,Palantir,AI/Defense,USA,FALSE
+ARM,ARM Holdings,Semiconductors,USA,FALSE
+ASML,ASML,Semiconductors,USA,FALSE
+TSM,TSMC,Semiconductors,USA,TRUE
+ORCL,Oracle,Enterprise,USA,TRUE
