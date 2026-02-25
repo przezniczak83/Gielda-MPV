@@ -78,6 +78,14 @@ const SentimentWidget = dynamic(
   },
 );
 
+const TerminalOverview = dynamic(
+  () => import("./TerminalOverview"),
+  {
+    loading: () => <div className="h-48 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
 type Event = {
@@ -236,6 +244,9 @@ export default function CompanyTabs({
       {/* Tab panels */}
       {activeTab === "Przegląd" && (
         <div className="space-y-6">
+          {/* Terminal overview — kompaktowy widok z danymi ze snapshotu */}
+          <TerminalOverview ticker={ticker} />
+
           <div>
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
               Wykres cen (30 dni)
