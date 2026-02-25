@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import PriceChart    from "./PriceChart";
-import FinancialKpis from "./FinancialKpis";
-import AiChat        from "./AiChat";
+import PriceChart       from "./PriceChart";
+import FinancialKpis    from "./FinancialKpis";
+import AiChat           from "./AiChat";
+import ConsensusWidget  from "./ConsensusWidget";
 
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
@@ -153,7 +154,10 @@ export default function CompanyTabs({
       )}
 
       {activeTab === "Finanse" && (
-        <FinancialKpis ticker={ticker} />
+        <div className="space-y-8">
+          <FinancialKpis ticker={ticker} />
+          <ConsensusWidget ticker={ticker} />
+        </div>
       )}
 
       {activeTab === "Eventy" && (
