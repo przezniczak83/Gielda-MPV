@@ -7,6 +7,7 @@ const links = [
   { href: "/",            label: "Dashboard"      },
   { href: "/companies",   label: "Spółki"         },
   { href: "/watchlists",  label: "Watchlisty"     },
+  { href: "/portfolio",   label: "Portfel"        },
   { href: "/alerts",      label: "Alerty"         },
   { href: "/upload",      label: "Wgraj raport"   },
   { href: "/api/health",  label: "Status systemu" },
