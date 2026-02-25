@@ -45,9 +45,9 @@ function formatMessage(e: EventRow): string {
   return lines.join("\n");
 }
 
-const MIN_IMPACT_SCORE = 7;
-const WINDOW_HOURS     = 24;
-const SLEEP_MS         = 300;
+const DEFAULT_MIN_IMPACT = 7; // fallback if no rule in DB
+const WINDOW_HOURS       = 24;
+const SLEEP_MS           = 300;
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
@@ -73,13 +73,25 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     return okResponse({ sent: 0, skipped_reason: "telegram_not_configured" });
   }
 
+  // ── Load active alert rules ────────────────────────────────────────────────
+  const { data: rulesData } = await supabase
+    .from("alert_rules")
+    .select("rule_type, threshold_value, threshold_operator, telegram_enabled")
+    .eq("is_active", true)
+    .eq("telegram_enabled", true);
+
+  // Find the impact_score rule threshold (default 7 if not configured)
+  const impactRule = (rulesData ?? []).find(r => r.rule_type === "impact_score");
+  const minImpact  = impactRule?.threshold_value ?? DEFAULT_MIN_IMPACT;
+  log.info(`Using impact_score threshold: ${minImpact} (${impactRule ? "from DB" : "default"})`);
+
   // ── Fetch unalerted high-impact events ────────────────────────────────────
   const windowStart = new Date(Date.now() - WINDOW_HOURS * 3600 * 1000).toISOString();
 
   const { data: events, error: fetchErr } = await supabase
     .from("company_events")
     .select("id, ticker, title, event_type, impact_score, published_at, url")
-    .gte("impact_score", MIN_IMPACT_SCORE)
+    .gte("impact_score", minImpact)
     .is("alerted_at", null)
     .gte("created_at", windowStart)
     .order("impact_score", { ascending: false })
@@ -91,7 +103,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   }
 
   const rows = (events ?? []) as EventRow[];
-  log.info(`Found ${rows.length} unalerted event(s) with score >= ${MIN_IMPACT_SCORE}`);
+  log.info(`Found ${rows.length} unalerted event(s) with score >= ${minImpact}`);
 
   if (rows.length === 0) {
     return okResponse({ sent: 0 });
