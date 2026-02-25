@@ -172,3 +172,78 @@ SELECT cron.schedule(
 ```
 
 Deploy: `sed "s/SERVICE_ROLE_KEY_HERE/$SERVICE_ROLE_KEY/" file.sql | supabase db push --linked`
+
+---
+
+## RSS Parsing Pattern (Deno / no DOM)
+
+Used in fetch-espi Edge Function. Regex-based RSS 2.0 parser (no DOMParser
+available in Deno server context).
+
+```typescript
+/** Split RSS XML into individual <item> strings. */
+function splitItems(xml: string): string[] {
+  const items: string[] = [];
+  let pos = 0;
+  while (true) {
+    const start = xml.indexOf("<item>", pos);
+    if (start === -1) break;
+    const end   = xml.indexOf("</item>", start);
+    if (end === -1) break;
+    items.push(xml.slice(start, end + 7));
+    pos = end + 7;
+  }
+  return items;
+}
+
+/** Extract text from tag, handles CDATA. */
+function extractTag(xml: string, tag: string): string {
+  const re = new RegExp(
+    `<${tag}[^>]*>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?<\\/${tag}>`, "s"
+  );
+  return re.exec(xml)?.[1].trim() ?? "";
+}
+```
+
+**Parse pubDate to ISO:**
+```typescript
+const iso = new Date(raw).toISOString(); // works for RFC 822 dates
+```
+
+**Note:** Bankier ESPI RSS title format: `"COMPANY NAME S.A.: announcement"`.
+Extract ticker by matching all-caps 2-6 char words against watchlist.
+
+---
+
+## Health Check Pattern
+
+Parallel stats query with `Promise.allSettled` for resilience:
+
+```typescript
+const [companiesRes, eventsRes, lastIngestRes, lastPriceRes] =
+  await Promise.allSettled([
+    supabase.from("companies").select("*", { count: "exact", head: true }),
+    supabase.from("company_events").select("*", { count: "exact", head: true }),
+    supabase.from("raw_ingest").select("inserted_at").order("inserted_at", { ascending: false }).limit(1),
+    supabase.from("price_history").select("date").order("date", { ascending: false }).limit(1),
+  ]);
+
+// Use status === "fulfilled" guard for each result
+const companies = companiesRes.status === "fulfilled"
+  ? (companiesRes.value.count ?? 0)
+  : 0;
+```
+
+**Response shape:**
+```json
+{
+  "ok": true,
+  "ts": "2026-02-25T...",
+  "stats": {
+    "companies": 50,
+    "events": 42,
+    "last_ingest": "2026-02-25T08:52:12.853Z",
+    "last_price": "2026-02-24"
+  }
+}
+```

@@ -101,6 +101,63 @@ from Supabase Edge Function IPs (DNS/connection errors).
 
 ---
 
+## Price Data Sources
+
+### 2026-02-25 — Twelve Data GPW suffix: .WAW not .WAR
+
+**Problem:**
+Initial implementation used `.WAR` suffix for GPW stocks in Twelve Data API.
+Warsaw Stock Exchange exchange code in Twelve Data is `.WAW`, not `.WAR`.
+
+**Fix:**
+`https://api.twelvedata.com/time_series?symbol={ticker}.WAW&interval=1day&...`
+
+**Note:** EODHD uses `.WAR` suffix (correct for EODHD). Each provider has its
+own exchange code — always verify per-provider documentation.
+
+---
+
+### 2026-02-25 — Twelve Data GPW coverage is limited
+
+**Problem:**
+Even with correct `.WAW` suffix, many Polish GPW stocks return 0 rows from
+Twelve Data (ACP, ALE, ALR, etc.). Twelve Data's free tier coverage of GPW
+is limited.
+
+**Solution:** EODHD has much better GPW coverage (249 rows per stock vs 0).
+Fallback chain: Twelve Data → EODHD → Yahoo is the right order.
+
+---
+
+## External APIs — ESPI Data Sources
+
+### 2026-02-25 — Bankier.pl RSS works from Edge Functions for ESPI data
+
+**Result:** `https://www.bankier.pl/rss/espi.xml` is accessible from Supabase
+Edge Function IPs. Returns real ESPI announcements in RSS 2.0 format.
+
+**Limitations:**
+- 10–20 items per feed (recent announcements only)
+- Ticker not in XML — must extract from title / PDF filenames in description
+- Title format: `COMPANY NAME S.A.: announcement text`
+- Match against watchlist using all-caps words from company name: works for
+  simple tickers (PKN, LPP, CCC, KGHM) but not abbreviations (CDR≠CD PROJEKT)
+
+**Pattern:** Extract all-caps 2–6 char words from title, compare against
+watchlist. Store ALL real records (even non-watchlist), let process-raw filter.
+
+---
+
+### 2026-02-25 — GPW RSS returns empty from Edge Functions
+
+**Problem:**
+`https://www.gpw.pl/komunikaty?type=rss` returns empty from Edge Function IPs
+(likely blocked or requires session cookie).
+
+**Fallback:** Bankier.pl RSS works reliably. Use as primary ESPI source.
+
+---
+
 ## AI & Prompt Engineering
 
 ### 2026-02-25 — Anthropic Claude Sonnet: primary for Polish text quality
