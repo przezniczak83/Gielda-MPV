@@ -138,7 +138,7 @@ async function exportPortfolio(): Promise<Response> {
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   const rows = (data ?? []).map(pos => {
-    const c = pos.companies as { name: string } | null;
+    const c = (pos.companies as unknown as { name: string }) ?? null;
     const qty  = Number(pos.quantity)      || 0;
     const avg  = Number(pos.avg_buy_price) || 0;
     return {
