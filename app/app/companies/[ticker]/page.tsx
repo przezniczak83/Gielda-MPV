@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import AiChat from "@/app/components/AiChat";
+import AiChat        from "@/app/components/AiChat";
+import PriceChart    from "@/app/components/PriceChart";
+import FinancialKpis from "@/app/components/FinancialKpis";
 
 export const dynamic = "force-dynamic";
 
@@ -131,6 +133,19 @@ export default async function CompanyPage({
               <span className="text-gray-600 text-sm">Brak danych</span>
             )}
           </div>
+        </div>
+
+        {/* Price chart */}
+        <div className="mb-6">
+          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+            Wykres cen (30 dni)
+          </h2>
+          <PriceChart ticker={ticker} />
+        </div>
+
+        {/* Financial KPIs */}
+        <div className="mb-8">
+          <FinancialKpis ticker={ticker} />
         </div>
 
         {/* AI Chat */}
