@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600; // ISR: 10 minutes — company list rarely changes
 
 export default async function CompaniesPage() {
   const { data: companies, error } = await supabase

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300; // ISR: 5 minutes
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

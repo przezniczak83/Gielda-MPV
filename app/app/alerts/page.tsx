@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60; // ISR: 1 minute — alerts change frequently
 
 type AlertRow = {
   ticker:       string;
