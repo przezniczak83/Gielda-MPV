@@ -284,6 +284,122 @@ Extract ticker by matching all-caps 2-6 char words against watchlist.
 
 ---
 
+## recharts Price Chart Pattern (Next.js App Router)
+
+For client-side price charts with dark theme:
+
+```typescript
+"use client";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+
+// Dynamic Y-axis domain to avoid flat chart on small price ranges:
+const prices = data.map(d => d.close).filter(Boolean);
+const minP = Math.min(...prices);
+const maxP = Math.max(...prices);
+const domain: [number, number] = [minP * 0.995, maxP * 1.005];
+
+<ResponsiveContainer width="100%" height={220}>
+  <LineChart data={data}>
+    <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+    <XAxis dataKey="date" tickFormatter={d => d.slice(5)} tick={{ fill: "#6b7280", fontSize: 11 }} />
+    <YAxis domain={domain} tick={{ fill: "#6b7280", fontSize: 11 }} tickFormatter={v => v.toFixed(2)} width={60} />
+    <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8 }} />
+    <Line type="monotone" dataKey="close" stroke="#22c55e" strokeWidth={2} dot={false} />
+  </LineChart>
+</ResponsiveContainer>
+```
+
+**Date trimming:** `d.slice(5)` converts `"2026-02-25"` → `"02-25"` for compact X-axis.
+
+**Y-axis domain:** `[min * 0.995, max * 1.005]` gives 0.5% padding — prevents flat line for narrow ranges.
+
+---
+
+## Supabase Storage Upload Pattern (Next.js Route Handler)
+
+For multipart PDF upload from browser → Supabase Storage → Edge Function:
+
+```typescript
+// 1. Accept multipart form
+const formData = await request.formData();
+const file     = formData.get("file") as File | null;
+const ticker   = (formData.get("ticker") as string)?.toUpperCase();
+
+// 2. Upload to Storage
+const fileName = `${ticker}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+const { error } = await supabase.storage
+  .from("reports")
+  .upload(fileName, file, { contentType: "application/pdf", upsert: false });
+
+// 3. Create signed URL for downstream Edge Function (avoids 6MB EF request limit)
+const { data: signed } = await supabase.storage
+  .from("reports")
+  .createSignedUrl(fileName, 3600);  // 1 hour TTL
+
+// 4. Call Edge Function with signed URL instead of raw file bytes
+await fetch(`https://${ref}.supabase.co/functions/v1/extract-pdf`, {
+  method:  "POST",
+  headers: { "Authorization": `Bearer ${serviceRoleKey}`, "Content-Type": "application/json" },
+  body:    JSON.stringify({ ticker, pdf_url: signed.signedUrl }),
+});
+```
+
+**Signed URL strategy:** Never send large files directly to Edge Functions (6MB limit).
+Upload first, then pass the signed URL to the function.
+
+---
+
+## Railway Scraper Pattern (Express + Node.js)
+
+For scraping sites that block Supabase Edge Function IPs:
+
+```
+scraper/
+  index.js            Express server (PORT from env)
+  scrapers/stooq.js   Stooq CSV price fetcher
+  scrapers/insider.js Cheerio HTML scraper
+  Procfile            web: node index.js
+  package.json        type: "module", express, node-fetch, cheerio
+```
+
+**Auth middleware:**
+```javascript
+function requireApiKey(req, res, next) {
+  if (req.headers["x-api-key"] !== process.env.SCRAPER_API_KEY)
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  next();
+}
+```
+
+**Deploy:** `railway up` from `scraper/` directory. Set `SCRAPER_API_KEY` env var in Railway dashboard.
+
+**Calling from Supabase Edge Function:**
+```typescript
+const res = await fetch(`${Deno.env.get("SCRAPER_BASE_URL")}/prices/gpw?ticker=${ticker}`, {
+  headers: { "X-API-Key": Deno.env.get("SCRAPER_API_KEY") },
+});
+```
+
+---
+
+## Stooq CSV Parsing Pattern (Node.js)
+
+Stooq returns Polish-header CSV; use fixed column indices:
+
+```javascript
+// Columns: Data(0), Otwarcie(1), Najwyzszy(2), Najnizszy(3), Zamkniecie(4), Wolumen(5)
+const url = `https://stooq.pl/q/d/l/?s=${ticker.toLowerCase()}&i=d`;
+const csv = await (await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 ..." } })).text();
+if (csv.trim() === "Brak danych") throw new Error("No data");
+const lines = csv.trim().split("\n").filter(Boolean);
+const last  = lines[lines.length - 1].split(",");
+return { date: last[0], open: +last[1], high: +last[2], low: +last[3], close: +last[4], volume: +last[5] };
+```
+
+**Note:** No `.pl` suffix for GPW tickers. `pkn` not `pkn.pl`.
+
+---
+
 ## Health Check Pattern
 
 Parallel stats query with `Promise.allSettled` for resilience:

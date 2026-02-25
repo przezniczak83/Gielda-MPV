@@ -223,6 +223,56 @@ analysis than GPT-4o Mini. Use as primary, GPT-4o Mini as fallback.
 
 Always implement try/catch → fallback pattern (see common-patterns.md).
 
+### 2026-02-25 — Stooq ticker format: no `.pl` suffix needed
+
+**Problem:**
+Initial implementation appended `.pl` to tickers (e.g., `pkn.pl`) based on old
+Stooq documentation. Stooq returns "Brak danych" for this format.
+
+**Fix:**
+Use bare lowercase ticker without suffix: `https://stooq.pl/q/d/l/?s=pkn&i=d`
+
+**Headers:** Stooq CSV columns are in Polish:
+`Data,Otwarcie,Najwyzszy,Najnizszy,Zamkniecie,Wolumen` (indexes 0–5).
+Do NOT use header name lookups — use fixed column indices.
+
+---
+
+### 2026-02-25 — Stooq accessible from Railway but NOT from Edge Functions
+
+**Result from scraper testing:** Stooq.pl returns data when called from a regular
+Node.js server (Railway, local). The IP block is specific to Supabase Edge Function
+IPs. Railway-hosted Express servers work fine as a proxy layer.
+
+---
+
+### 2026-02-25 — `.env.local` newline corruption breaks service role key
+
+**Problem:**
+After a sed substitution or manual edit, the `SUPABASE_SERVICE_ROLE_KEY` line was
+missing a trailing newline, causing `INGEST_API_KEY=...` to be appended to the key
+value. All subsequent API calls returned HTTP 401.
+
+**Symptom:** 401 from Supabase REST API despite "correct" key in .env.local.
+
+**Fix:** Rewrite the file with explicit newlines. Verify by running:
+`wc -c` on each key — a JWT service_role key is always ~220 chars.
+
+---
+
+### 2026-02-25 — recharts requires `"use client"` in Next.js App Router
+
+**Lesson:**
+recharts uses browser APIs (ResizeObserver, DOM). Any component importing
+recharts MUST be a Client Component (`"use client"` at top of file).
+
+**Setup:**
+Install in the `app/` subdirectory: `cd app && npm install recharts`
+
+recharts is listed in `app/package.json` dependencies.
+
+---
+
 ### 2026-02-25 — Gemini PDF extraction: use `response_mime_type: application/json`
 
 **Lesson:**

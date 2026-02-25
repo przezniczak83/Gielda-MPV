@@ -94,6 +94,66 @@ browser session cookies). Yahoo Finance API works from server environments.
 
 ---
 
+## 2026-02-25 — Railway Scraper as IP-Bypass Proxy Layer
+
+**Decision:** Deploy a lightweight Express.js scraper to Railway for data sources
+that block Supabase Edge Function IPs.
+
+**Rationale:**
+- Stooq.pl, GPW.pl, and some corporate sites block requests from Supabase's
+  server IP ranges (cloud provider ranges detected as bots/scrapers)
+- Railway's IP range is not blocked (residential/standard cloud)
+- Edge Functions call Railway HTTP endpoints instead of scraping directly
+
+**Architecture:**
+```
+Browser → Next.js API Route → Supabase Edge Function → Railway Scraper → stooq.pl
+                                                                        → gpw.pl
+```
+
+**Security:** `X-API-Key` header auth. Key stored in Supabase Secrets + Vercel env vars.
+
+**Files:** `scraper/` directory in repo root (separate from `app/`).
+
+**Trade-off:** Extra hop + Railway service cost. Acceptable for MVP. Alternative would
+be headless browser (Playwright) but that is more complex and expensive.
+
+---
+
+## 2026-02-25 — Supabase Storage for PDF Report Archival
+
+**Decision:** Store uploaded PDF reports in Supabase Storage (`reports` bucket)
+before passing to Gemini for extraction.
+
+**Rationale:**
+- Edge Functions have a 6MB request size limit — cannot send large PDFs directly
+- Signed URLs let Edge Functions download PDFs from Storage without auth complexity
+- PDF archive enables re-processing with different AI models later
+- Private bucket (not public) with service_role-only access
+
+**File naming:** `{TICKER}/{timestamp}_{sanitized_filename}` for organized browsing.
+
+**Signed URL TTL:** 1 hour (sufficient for synchronous extraction pipeline).
+
+---
+
+## 2026-02-25 — recharts for Client-Side Price Charts
+
+**Decision:** Use recharts for price history visualization on company detail pages.
+
+**Rationale:**
+- React-native chart library, integrates cleanly with Next.js App Router
+- Responsive via `ResponsiveContainer` wrapper
+- No canvas/WebGL dependencies — works in all browsers
+- Dark theme customization via `stroke`, `fill`, `contentStyle` props
+
+**Alternative considered:** Chart.js — more complex React integration, requires
+additional react-chartjs-2 wrapper.
+
+**Constraint:** Must be Client Component (`"use client"`) — recharts uses browser APIs.
+
+---
+
 ## 2026-02-25 — pg_trgm for Fuzzy Deduplication
 
 **Decision:** Use PostgreSQL pg_trgm extension for Level 2 event deduplication.
