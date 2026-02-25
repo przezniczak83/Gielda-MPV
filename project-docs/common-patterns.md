@@ -648,4 +648,104 @@ const companies = companiesRes.status === "fulfilled"
     "last_price": "2026-02-24"
   }
 }
+
+---
+
+## Keyboard Navigation Pattern (Bloomberg Terminal UX)
+
+Used in CompanyTabs, can be applied to any tabbed client component.
+
+```typescript
+useEffect(() => {
+  function handler(e: KeyboardEvent) {
+    // Never intercept when user is typing in a form field
+    if (e.target instanceof HTMLInputElement)    return;
+    if (e.target instanceof HTMLTextAreaElement) return;
+    const tabMap: Record<string, Tab> = {
+      "1": "Tab1", "2": "Tab2", "3": "Tab3", "4": "Tab4",
+    };
+    if (tabMap[e.key]) setActiveTab(tabMap[e.key]);
+  }
+  window.addEventListener("keydown", handler);
+  return () => window.removeEventListener("keydown", handler);
+}, []);
+```
+
+**UX conventions:**
+- Prefix tab labels with `[n]` (e.g., `[1] Przegląd`)
+- Show dim hint bar: `press 1–4 to switch · /m macro · /s screener`
+- Slash commands (`/m`, `/w`, `/p`, `/s`) navigate to top-level routes
+
+---
+
+## FRED API Observation Fetch Pattern
+
+```typescript
+async function fetchFREDSeries(
+  apiKey: string, seriesId: string,
+): Promise<{ current: number; previous: number; date: string } | null> {
+  const url =
+    `https://api.stlouisfed.org/fred/series/observations` +
+    `?series_id=${seriesId}&api_key=${apiKey}&file_type=json&limit=2&sort_order=desc`;
+  const res  = await fetch(url);
+  if (!res.ok) return null;
+  const data = await res.json() as { observations: { date: string; value: string }[] };
+  const obs  = data.observations.filter(o => o.value !== ".");  // skip missing
+  if (obs.length < 2) return null;
+  return {
+    current:  parseFloat(obs[0].value),
+    previous: parseFloat(obs[1].value),
+    date:     obs[0].date,
+  };
+}
+```
+
+**Available series for Polish investor context:**
+| Series ID  | Name             | Notes              |
+|------------|------------------|--------------------|
+| FEDFUNDS   | Fed Funds Rate   | Monthly            |
+| CPIAUCSL   | US CPI (YoY)     | Monthly            |
+| DGS10      | US 10Y Treasury  | Daily              |
+| UNRATE     | US Unemployment  | Monthly            |
+
+**Free key:** https://fred.stlouisfed.org/docs/api/api_key.html
+**Secret:** `supabase secrets set FRED_API_KEY=your_key`
+
+---
+
+## Configurable Alert Rules Pattern
+
+Schema + API for DB-driven alert thresholds:
+
+```sql
+CREATE TABLE alert_rules (
+  id                 bigserial    PRIMARY KEY,
+  rule_name          text         NOT NULL,
+  rule_type          text         NOT NULL CHECK (rule_type IN (
+    'impact_score', 'price_change', 'health_score',
+    'red_flags', 'insider_buy', 'new_recommendation'
+  )),
+  threshold_value    numeric(10,4) NULL,
+  threshold_operator text          NULL CHECK (threshold_operator IN ('>', '<', '>=', '<=', '=')),
+  ticker             text          NULL REFERENCES companies(ticker) ON DELETE CASCADE,
+  is_active          boolean       NOT NULL DEFAULT true,
+  telegram_enabled   boolean       NOT NULL DEFAULT true,
+  created_at         timestamptz   NOT NULL DEFAULT now()
+);
+```
+
+**Edge Function reads at runtime:**
+```typescript
+const { data: rulesData } = await supabase
+  .from("alert_rules")
+  .select("rule_type, threshold_value, threshold_operator, telegram_enabled")
+  .eq("is_active", true)
+  .eq("telegram_enabled", true);
+
+const impactRule = (rulesData ?? []).find(r => r.rule_type === "impact_score");
+const minImpact  = impactRule?.threshold_value ?? 7; // default fallback
+```
+
+**API route:** `/api/alert-rules` — GET/POST/PATCH/DELETE
+**UI:** Inline toggle (is_active, telegram_enabled) + inline threshold edit + add form
 ```

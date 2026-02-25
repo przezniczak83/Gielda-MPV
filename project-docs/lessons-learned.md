@@ -417,4 +417,137 @@ Still strip markdown fences defensively in the parser.
 Gemini 2.0 Flash is multimodal and cost-effective for PDF processing:
 - Model: `gemini-2.0-flash`
 - API: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GOOGLE_AI_KEY}`
+
+---
+
+## Terminal UX — Keyboard Navigation
+
+### 2026-02-25 — Bloomberg-style keyboard shortcuts: 1–4 for tab switching
+
+**Pattern:** Add `useEffect` keyboard handler in client components with tabs.
+Skip handler when focus is on input/textarea to avoid conflicts with typing.
+
+```typescript
+useEffect(() => {
+  function handler(e: KeyboardEvent) {
+    if (e.target instanceof HTMLInputElement)  return;
+    if (e.target instanceof HTMLTextAreaElement) return;
+    const tabMap: Record<string, Tab> = { "1": "tab1", "2": "tab2", ... };
+    if (tabMap[e.key]) setActiveTab(tabMap[e.key]);
+  }
+  window.addEventListener("keydown", handler);
+  return () => window.removeEventListener("keydown", handler);
+}, []);
+```
+
+Show `[n]` prefix in tab labels and a dim keyboard hint bar below tabs
+(`press 1-4 to switch · ESC to close`) for discoverability.
+
+---
+
+### 2026-02-25 — Command palette with /slash shortcuts in GlobalSearch
+
+**Pattern:** Map slash commands to routes. Detect on query change.
+When query matches `/m`, `/w`, `/p`, `/s` — skip the search API call,
+show a dedicated command row with ↵ button, navigate on Enter.
+
+```typescript
+const COMMANDS: Record<string, { label: string; href: string }> = {
+  "/m": { label: "Makro wskaźniki", href: "/macro" },
+  "/w": { label: "Watchlisty",      href: "/watchlists" },
+  "/p": { label: "Portfel",         href: "/portfolio" },
+  "/s": { label: "Screener spółek", href: "/screener" },
+};
+const commandMatch = COMMANDS[query.trim().toLowerCase()] ?? null;
+// Skip fetch when commandMatch is set
+// Enter key: if commandMatch → router.push(commandMatch.href) → close
+```
+
+---
+
+## FRED API
+
+### 2026-02-25 — FRED API graceful fallback when key absent
+
+**Pattern:** `Deno.env.get("FRED_API_KEY")` → skip entire FRED block with
+`log.info(...)` (not warn/error) when key is absent. FRED is optional enrichment.
+
+```typescript
+const fredKey = Deno.env.get("FRED_API_KEY");
+if (!fredKey) {
+  log.info("FRED_API_KEY not set — skipping USA macro");
+} else {
+  // fetch FEDFUNDS, CPIAUCSL, DGS10, UNRATE
+}
+```
+
+**URL pattern:**
+```
+https://api.stlouisfed.org/fred/series/observations
+  ?series_id={ID}
+  &api_key={KEY}
+  &file_type=json
+  &limit=2
+  &sort_order=desc
+```
+Returns `observations[]` — filter out `value === "."` (missing data).
+
+**Free key:** https://fred.stlouisfed.org/docs/api/api_key.html
+**UI:** Show dashed-border placeholder with setup link when FRED section empty.
+
+---
+
+## Configurable Alert Rules
+
+### 2026-02-25 — DB-driven alert thresholds replace hardcoded values
+
+**Pattern:** Store thresholds in `alert_rules` table. Edge Function reads them
+at runtime. Falls back to hardcoded default if no rule exists.
+
+```typescript
+const { data: rulesData } = await supabase
+  .from("alert_rules")
+  .select("rule_type, threshold_value, threshold_operator, telegram_enabled")
+  .eq("is_active", true)
+  .eq("telegram_enabled", true);
+
+const impactRule = (rulesData ?? []).find(r => r.rule_type === "impact_score");
+const minImpact  = impactRule?.threshold_value ?? DEFAULT_MIN_IMPACT; // 7
+```
+
+**Migration:** `0028_alert_rules.sql` — table + 5 default rules + RLS policy.
+
+**API:** `/api/alert-rules` — GET/POST/PATCH/DELETE (Next.js route handler).
+
+---
+
+## Next.js — Server + Client Wrapper Pattern
+
+### 2026-02-25 — Server component fetches ISR data, client wrapper adds interactivity
+
+**Problem:** ISR pages (`export const revalidate = N`) must be server components,
+but UI tabs and API calls require client-side state.
+
+**Solution:** Server component fetches initial data and passes to a `"use client"` wrapper.
+The client component handles tab switching, additional fetches (e.g., rules list), and mutations.
+
+```tsx
+// page.tsx (server)
+export const revalidate = 60;
+export default async function Page() {
+  const { data } = await supabase.from("table").select("...");
+  return <PageClient initialData={data ?? []} />;
+}
+
+// PageClient.tsx ("use client")
+export default function PageClient({ initialData }: { initialData: Row[] }) {
+  const [tab, setTab] = useState<"history" | "settings">("history");
+  const [settings, setSettings] = useState<Setting[]>([]);
+  useEffect(() => { fetch("/api/settings").then(...); }, []);
+  // ...
+}
+```
+
+**Benefit:** ISR caching for initial data + full client interactivity without
+converting the whole page to `"use client"` (which disables ISR).
 - Send PDF as `inline_data` with `mime_type: "application/pdf"`
