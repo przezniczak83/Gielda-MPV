@@ -17,16 +17,41 @@ export async function GET(request: Request) {
     { auth: { persistSession: false } },
   );
 
-  const { data, error } = await supabase
-    .from("company_financials")
-    .select("period, revenue, net_income, ebitda, eps, net_debt, currency")
-    .eq("ticker", ticker)
-    .order("period", { ascending: false })
-    .limit(4);
+  // Fetch financial rows + computed KPIs in parallel
+  const [financialsRes, kpisRes] = await Promise.all([
+    supabase
+      .from("company_financials")
+      .select("period, revenue, net_income, ebitda, eps, net_debt, currency")
+      .eq("ticker", ticker)
+      .order("period", { ascending: false })
+      .limit(4),
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    supabase
+      .from("company_kpis")
+      .select("kpi_type, value, metadata, calculated_at")
+      .eq("ticker", ticker)
+      .in("kpi_type", ["health_score", "red_flags"]),
+  ]);
+
+  if (financialsRes.error) {
+    return NextResponse.json({ error: financialsRes.error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data ?? [], { headers: { "Cache-Control": "no-store" } });
+  const kpisMap: Record<string, { value: number | null; metadata: unknown; calculated_at: string }> = {};
+  for (const row of (kpisRes.data ?? [])) {
+    kpisMap[row.kpi_type] = {
+      value:        row.value,
+      metadata:     row.metadata,
+      calculated_at: row.calculated_at,
+    };
+  }
+
+  return NextResponse.json(
+    {
+      financials:   financialsRes.data ?? [],
+      health_score: kpisMap["health_score"] ?? null,
+      red_flags:    kpisMap["red_flags"]    ?? null,
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
