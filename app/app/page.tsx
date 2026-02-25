@@ -96,6 +96,21 @@ type TopCompany = {
   events:    number;
 };
 
+type UpcomingEvent = {
+  ticker:     string;
+  event_type: string;
+  event_date: string;
+  title:      string;
+};
+
+const CAL_EMOJI: Record<string, string> = {
+  earnings:        "📊",
+  dividend_exdate: "💰",
+  agm:             "🏛️",
+  analyst_day:     "🎤",
+  other:           "📌",
+};
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function DashboardPage() {
@@ -112,6 +127,7 @@ export default async function DashboardPage() {
     { data: topEventsRaw },
     { data: alertedEvents },
     { data: recommendations },
+    { data: upcomingEvents },
   ] = await Promise.all([
     supabase.from("companies").select("*", { count: "exact", head: true }),
     supabase.from("company_events").select("*", { count: "exact", head: true }).gt("created_at", oneDayAgo),
@@ -136,6 +152,12 @@ export default async function DashboardPage() {
       .from("early_recommendations")
       .select("ticker, recommendation, target_price, received_at")
       .order("received_at", { ascending: false })
+      .limit(5),
+    supabase
+      .from("calendar_events")
+      .select("ticker, event_type, event_date, title")
+      .gte("event_date", todayStart)
+      .order("event_date", { ascending: true })
       .limit(5),
   ]);
 
@@ -330,6 +352,49 @@ export default async function DashboardPage() {
                       <div className="text-xs text-gray-600 mt-0.5">{timeAgo(r.received_at)}</div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Nadchodzące eventy */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
+                  Nadchodzące eventy
+                </h2>
+                <Link href="/calendar" className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
+                  Wszystkie →
+                </Link>
+              </div>
+              {!(upcomingEvents as UpcomingEvent[])?.length ? (
+                <div className="rounded-xl border border-gray-800 bg-gray-900/40 py-6 text-center text-gray-500 text-sm">
+                  Brak nadchodzących eventów
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {(upcomingEvents as UpcomingEvent[]).map((ev, i) => {
+                    const date = new Date(ev.event_date);
+                    const isToday = date.toDateString() === new Date().toDateString();
+                    return (
+                      <div key={i} className="rounded-xl border border-gray-800 bg-gray-900/40 px-4 py-2.5 flex items-center gap-3">
+                        <span className="text-base">{CAL_EMOJI[ev.event_type] ?? "📌"}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Link
+                              href={`/companies/${ev.ticker}`}
+                              className="font-mono font-bold text-blue-400 hover:text-blue-300 text-xs transition-colors"
+                            >
+                              {ev.ticker}
+                            </Link>
+                            <span className={`text-xs tabular-nums ${isToday ? "text-yellow-400 font-bold" : "text-gray-500"}`}>
+                              {isToday ? "DZIŚ" : date.toLocaleDateString("pl-PL", { day: "2-digit", month: "short" })}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-400 truncate mt-0.5">{ev.title}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
