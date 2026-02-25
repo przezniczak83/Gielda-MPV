@@ -60,11 +60,26 @@ export default function GlobalSearch() {
   // Debounced search
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Command shortcuts (/m /w /p /s) ────────────────────────────────────
+  const COMMANDS: Record<string, { label: string; href: string }> = {
+    "/m":  { label: "Makro wskaźniki",   href: "/macro"      },
+    "/w":  { label: "Watchlisty",        href: "/watchlists" },
+    "/p":  { label: "Portfel",           href: "/portfolio"  },
+    "/s":  { label: "Screener spółek",   href: "/screener"   },
+  };
+
+  const commandMatch = COMMANDS[query.trim().toLowerCase()] ?? null;
+
   function handleInput(val: string) {
     setQuery(val);
     setSelected(0);
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
     if (!val.trim() || val.length < 2) {
+      setResults({ companies: [], events: [] });
+      return;
+    }
+    // Don't search if it's a slash command
+    if (val.trim().startsWith("/")) {
       setResults({ companies: [], events: [] });
       return;
     }
@@ -100,7 +115,17 @@ export default function GlobalSearch() {
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") { e.preventDefault(); setSelected(s => Math.min(s + 1, allResults.length - 1)); }
     if (e.key === "ArrowUp")   { e.preventDefault(); setSelected(s => Math.max(s - 1, 0)); }
-    if (e.key === "Enter" && allResults[selected]) navigate(allResults[selected].href);
+    if (e.key === "Enter") {
+      // Command shortcut: /m /w /p /s
+      if (commandMatch) { navigate(commandMatch.href); return; }
+      // Plain ticker: "PKN" → /companies/PKN
+      const q = query.trim().toUpperCase();
+      if (q.length >= 2 && q.length <= 8 && !q.includes(" ") && allResults.length === 0) {
+        navigate(`/companies/${q}`);
+        return;
+      }
+      if (allResults[selected]) navigate(allResults[selected].href);
+    }
   }
 
   if (!open) {
@@ -148,8 +173,22 @@ export default function GlobalSearch() {
             </kbd>
           </div>
 
+          {/* Command match */}
+          {commandMatch && (
+            <div className="px-4 py-3 border-b border-gray-800">
+              <button
+                onClick={() => navigate(commandMatch.href)}
+                className="w-full flex items-center gap-3 text-left hover:bg-gray-800/40 rounded-lg px-2 py-2 transition-colors"
+              >
+                <span className="font-mono text-blue-400 text-sm w-10 shrink-0">{query.trim()}</span>
+                <span className="text-sm text-gray-200 flex-1">{commandMatch.label}</span>
+                <span className="text-xs text-gray-500">↵ przejdź</span>
+              </button>
+            </div>
+          )}
+
           {/* Results */}
-          {query.length >= 2 && (
+          {query.length >= 2 && !commandMatch && (
             <div className="max-h-80 overflow-y-auto">
               {!hasResults && !loading ? (
                 <div className="px-4 py-6 text-center text-gray-500 text-sm">Brak wyników dla „{query}"</div>
@@ -211,10 +250,19 @@ export default function GlobalSearch() {
 
           {/* Footer hint */}
           {query.length < 2 && (
-            <div className="px-4 py-3 text-xs text-gray-600 flex gap-4">
-              <span><kbd className="font-mono">↑↓</kbd> nawigacja</span>
-              <span><kbd className="font-mono">↵</kbd> otwórz</span>
-              <span><kbd className="font-mono">Esc</kbd> zamknij</span>
+            <div className="px-4 py-3 border-t border-gray-800/50 space-y-2">
+              <div className="text-xs text-gray-600 flex gap-4">
+                <span><kbd className="font-mono">↑↓</kbd> nawigacja</span>
+                <span><kbd className="font-mono">↵</kbd> otwórz</span>
+                <span><kbd className="font-mono">Esc</kbd> zamknij</span>
+              </div>
+              <div className="text-[10px] font-mono text-gray-700 flex flex-wrap gap-x-4 gap-y-1">
+                <span><span className="text-gray-500">PKN</span> → spółka</span>
+                <span><span className="text-gray-500">/m</span> → makro</span>
+                <span><span className="text-gray-500">/w</span> → watchlisty</span>
+                <span><span className="text-gray-500">/p</span> → portfel</span>
+                <span><span className="text-gray-500">/s</span> → screener</span>
+              </div>
             </div>
           )}
         </div>

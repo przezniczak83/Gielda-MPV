@@ -147,6 +147,23 @@ export default function CompanyTabs({
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
 
+  // ── Keyboard navigation (1–4 keys) ───────────────────────────────────────
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement)  return;
+      if (e.target instanceof HTMLTextAreaElement) return;
+      const tabMap: Record<string, Tab> = {
+        "1": "Przegląd",
+        "2": "Finanse",
+        "3": "Eventy",
+        "4": "AI Chat",
+      };
+      if (tabMap[e.key]) setActiveTab(tabMap[e.key]);
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   async function handleRefresh() {
     setRefreshing(true);
     try {
@@ -195,8 +212,8 @@ export default function CompanyTabs({
       </div>
 
       {/* Tab nav */}
-      <div className="flex gap-1 mb-6 border-b border-gray-800 pb-0">
-        {TABS.map(tab => (
+      <div className="flex gap-1 mb-1 border-b border-gray-800 pb-0">
+        {TABS.map((tab, i) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -206,10 +223,15 @@ export default function CompanyTabs({
                 : "text-gray-500 border-transparent hover:text-gray-300 hover:border-gray-600"
             }`}
           >
+            <span className="font-mono text-[10px] text-gray-600 mr-1.5">[{i + 1}]</span>
             {tab}
           </button>
         ))}
       </div>
+      {/* Keyboard hint */}
+      <p className="text-[10px] font-mono text-gray-700 mb-5 pl-1">
+        Klawisze: [1] Przegląd · [2] Finanse · [3] Eventy · [4] AI Chat
+      </p>
 
       {/* Tab panels */}
       {activeTab === "Przegląd" && (
