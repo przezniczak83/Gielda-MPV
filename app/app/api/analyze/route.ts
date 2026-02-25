@@ -28,8 +28,8 @@ export async function POST(request: Request) {
     "Authorization": `Bearer ${serviceKey}`,
   };
 
-  // Call analyze-health, detect-flags, and analyze-dividend in parallel
-  const [healthRes, flagsRes, dividendRes] = await Promise.allSettled([
+  // Call all analyzers in parallel
+  const [healthRes, flagsRes, dividendRes, earningsRes] = await Promise.allSettled([
     fetch(`${efBase}/analyze-health`, {
       method: "POST", headers, body: JSON.stringify({ ticker }),
     }).then(r => r.json()),
@@ -41,18 +41,24 @@ export async function POST(request: Request) {
     fetch(`${efBase}/analyze-dividend`, {
       method: "POST", headers, body: JSON.stringify({ ticker }),
     }).then(r => r.json()),
+
+    fetch(`${efBase}/analyze-earnings`, {
+      method: "POST", headers, body: JSON.stringify({ ticker }),
+    }).then(r => r.json()),
   ]);
 
   const health   = healthRes.status   === "fulfilled" ? healthRes.value   : { ok: false };
   const flags    = flagsRes.status    === "fulfilled" ? flagsRes.value    : { ok: false };
   const dividend = dividendRes.status === "fulfilled" ? dividendRes.value : { ok: false };
+  const earnings = earningsRes.status === "fulfilled" ? earningsRes.value : { ok: false };
 
   return NextResponse.json({
-    ok:           true,
+    ok:               true,
     ticker,
-    health_score: health,
-    red_flags:    flags,
-    dividend:     dividend,
-    ts:           new Date().toISOString(),
+    health_score:     health,
+    red_flags:        flags,
+    dividend:         dividend,
+    earnings_quality: earnings,
+    ts:               new Date().toISOString(),
   });
 }

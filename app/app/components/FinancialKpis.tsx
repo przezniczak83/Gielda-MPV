@@ -27,9 +27,10 @@ interface RedFlag {
 }
 
 interface ApiResponse {
-  financials:   FinancialRow[];
-  health_score: KpiData | null;
-  red_flags:    KpiData | null;
+  financials:       FinancialRow[];
+  health_score:     KpiData | null;
+  red_flags:        KpiData | null;
+  earnings_quality: KpiData | null;
 }
 
 /** Format large numbers: >1B → "1.2 mld", >1M → "123 mln", else as-is */
@@ -115,9 +116,10 @@ export default function FinancialKpis({ ticker }: { ticker: string }) {
     );
   }
 
-  const rows       = data?.financials ?? [];
-  const healthData = data?.health_score ?? null;
-  const flagsData  = data?.red_flags   ?? null;
+  const rows       = data?.financials        ?? [];
+  const healthData = data?.health_score      ?? null;
+  const flagsData  = data?.red_flags         ?? null;
+  const eqData     = data?.earnings_quality  ?? null;
 
   const hasFinancials  = rows.length > 0;
   const hasHealth      = healthData !== null && healthData.value !== null;
@@ -226,6 +228,27 @@ export default function FinancialKpis({ ticker }: { ticker: string }) {
             {flagsSummary}
           </p>
         )}
+
+        {/* Earnings Quality badge */}
+        <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-800">
+          <span className="text-xs text-gray-500 w-28 flex-shrink-0">Earnings Quality</span>
+          {eqData?.value != null ? (
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs font-bold ${
+              eqData.value >= 7 ? "bg-green-500/15 text-green-400 border-green-500/30"
+              : eqData.value >= 4 ? "bg-yellow-500/15 text-yellow-400 border-yellow-500/30"
+              : "bg-red-500/15 text-red-400 border-red-500/30"
+            }`}>
+              EQ: {eqData.value.toFixed(1)}/10
+            </span>
+          ) : (
+            <span className="text-xs text-gray-600 italic">Brak — kliknij Przelicz</span>
+          )}
+          {eqData?.metadata && (
+            <span className="text-xs text-gray-500 italic truncate">
+              {(eqData.metadata as { comment?: string }).comment}
+            </span>
+          )}
+        </div>
       </div>
 
     </div>
