@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import ExportButton from "./ExportButton";
 
 // ── Lazy-loaded heavy components ─────────────────────────────────────────────
 
@@ -227,6 +228,9 @@ export default function CompanyTabs({
 
       {activeTab === "Finanse" && (
         <div className="space-y-8">
+          <div className="flex justify-end">
+            <ExportButton href={`/api/export?type=financials&ticker=${ticker}`} label="Eksportuj finansowe CSV" />
+          </div>
           <FinancialKpis ticker={ticker} />
           <MoatWidget ticker={ticker} sector={sector} />
           <PeerComparison ticker={ticker} />
@@ -236,7 +240,13 @@ export default function CompanyTabs({
       )}
 
       {activeTab === "Eventy" && (
-        <EventsList events={events} />
+        <div className="space-y-3">
+          <div className="flex justify-end gap-2">
+            <ExportButton href={`/api/export?type=events&ticker=${ticker}`} label="Eksportuj eventy CSV" />
+            <ExportButton href={`/api/export?type=prices&ticker=${ticker}`} label="Eksportuj ceny CSV" />
+          </div>
+          <EventsList events={events} />
+        </div>
       )}
 
       {activeTab === "AI Chat" && (

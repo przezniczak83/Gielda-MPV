@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams }  from "next/navigation";
+import ExportButton from "../../components/ExportButton";
 
 interface Company { name: string; sector: string; market: string }
 interface PriceRow { close: number; date: string }
@@ -109,9 +110,12 @@ export default function WatchlistDetailPage() {
           <span className="text-gray-300 font-medium">{list.name}</span>
         </nav>
 
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">{list.name}</h1>
-          {list.description && <p className="text-gray-500 text-sm mt-1">{list.description}</p>}
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white">{list.name}</h1>
+            {list.description && <p className="text-gray-500 text-sm mt-1">{list.description}</p>}
+          </div>
+          <ExportButton href={`/api/export?type=watchlist&id=${id}`} label="Eksportuj CSV" />
         </div>
 
         {/* Add company form */}

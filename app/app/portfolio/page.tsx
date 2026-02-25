@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import ExportButton from "../components/ExportButton";
 
 interface PortfolioPosition {
   id:             number;
@@ -124,9 +125,12 @@ export default function PortfolioPage() {
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-5xl mx-auto px-6 py-10">
 
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">Portfel</h1>
-          <p className="text-gray-500 text-sm mt-1">Śledź pozycje i wyniki inwestycyjne</p>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Portfel</h1>
+            <p className="text-gray-500 text-sm mt-1">Śledź pozycje i wyniki inwestycyjne</p>
+          </div>
+          <ExportButton href="/api/export?type=portfolio" label="Eksportuj CSV" />
         </div>
 
         {/* ── Summary cards ── */}
