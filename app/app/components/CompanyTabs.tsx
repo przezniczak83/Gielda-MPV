@@ -7,6 +7,7 @@ import AiChat           from "./AiChat";
 import ConsensusWidget  from "./ConsensusWidget";
 import ForecastWidget   from "./ForecastWidget";
 import PeerComparison  from "./PeerComparison";
+import OwnershipWidget from "./OwnershipWidget";
 
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
@@ -152,6 +153,8 @@ export default function CompanyTabs({
           </div>
           {/* Health score + red flags (overview section of FinancialKpis) */}
           <HealthOverview ticker={ticker} />
+          {/* Institutional ownership */}
+          <OwnershipWidget ticker={ticker} />
         </div>
       )}
 
