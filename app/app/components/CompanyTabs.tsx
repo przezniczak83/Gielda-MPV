@@ -8,6 +8,7 @@ import ConsensusWidget  from "./ConsensusWidget";
 import ForecastWidget   from "./ForecastWidget";
 import PeerComparison  from "./PeerComparison";
 import OwnershipWidget from "./OwnershipWidget";
+import MoatWidget      from "./MoatWidget";
 
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
@@ -65,10 +66,12 @@ type Tab = typeof TABS[number];
 
 export default function CompanyTabs({
   ticker,
+  sector,
   events,
   latestPrice,
 }: {
   ticker:       string;
+  sector?:      string | null;
   events:       Event[];
   latestPrice:  LatestPrice;
 }) {
@@ -161,6 +164,7 @@ export default function CompanyTabs({
       {activeTab === "Finanse" && (
         <div className="space-y-8">
           <FinancialKpis ticker={ticker} />
+          <MoatWidget ticker={ticker} sector={sector} />
           <PeerComparison ticker={ticker} />
           <ConsensusWidget ticker={ticker} />
           <ForecastWidget ticker={ticker} />

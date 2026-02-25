@@ -30,7 +30,7 @@ export async function GET(request: Request) {
       .from("company_kpis")
       .select("kpi_type, value, metadata, calculated_at")
       .eq("ticker", ticker)
-      .in("kpi_type", ["health_score", "red_flags", "dividend_score", "earnings_quality"]),
+      .in("kpi_type", ["health_score", "red_flags", "dividend_score", "earnings_quality", "moat_score"]),
   ]);
 
   if (financialsRes.error) {
@@ -48,11 +48,12 @@ export async function GET(request: Request) {
 
   return NextResponse.json(
     {
-      financials:     financialsRes.data ?? [],
-      health_score:      kpisMap["health_score"]      ?? null,
-      red_flags:         kpisMap["red_flags"]          ?? null,
-      dividend_score:    kpisMap["dividend_score"]     ?? null,
-      earnings_quality:  kpisMap["earnings_quality"]   ?? null,
+      financials:       financialsRes.data ?? [],
+      health_score:     kpisMap["health_score"]      ?? null,
+      red_flags:        kpisMap["red_flags"]          ?? null,
+      dividend_score:   kpisMap["dividend_score"]     ?? null,
+      earnings_quality: kpisMap["earnings_quality"]   ?? null,
+      moat_score:       kpisMap["moat_score"]         ?? null,
     },
     { headers: { "Cache-Control": "no-store" } },
   );

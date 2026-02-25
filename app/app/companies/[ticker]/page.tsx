@@ -68,6 +68,7 @@ export default async function CompanyPage({
         {/* Tabbed content (client component) */}
         <CompanyTabs
           ticker={ticker}
+          sector={company.sector}
           events={(events ?? []) as Parameters<typeof CompanyTabs>[0]["events"]}
           latestPrice={latestPrice as { close: number; date: string } | null}
         />
