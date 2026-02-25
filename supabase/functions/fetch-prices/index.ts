@@ -67,7 +67,7 @@ async function fetchTwelveDataGPW(ticker: string): Promise<OHLCV[]> {
   const key = Deno.env.get("TWELVE_DATA_KEY") ?? "";
   if (!key) throw new Error("TWELVE_DATA_KEY not set");
 
-  const url = `https://api.twelvedata.com/time_series?symbol=${ticker}.WAR&interval=1day&outputsize=30&apikey=${key}`;
+  const url = `https://api.twelvedata.com/time_series?symbol=${ticker}.WAW&interval=1day&outputsize=30&apikey=${key}`;
   return fetchTwelveData(url);
 }
 
