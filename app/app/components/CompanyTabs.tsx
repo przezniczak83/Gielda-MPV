@@ -6,6 +6,7 @@ import FinancialKpis    from "./FinancialKpis";
 import AiChat           from "./AiChat";
 import ConsensusWidget  from "./ConsensusWidget";
 import ForecastWidget   from "./ForecastWidget";
+import PeerComparison  from "./PeerComparison";
 
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
@@ -157,6 +158,7 @@ export default function CompanyTabs({
       {activeTab === "Finanse" && (
         <div className="space-y-8">
           <FinancialKpis ticker={ticker} />
+          <PeerComparison ticker={ticker} />
           <ConsensusWidget ticker={ticker} />
           <ForecastWidget ticker={ticker} />
         </div>
