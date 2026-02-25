@@ -49,3 +49,28 @@ BDX,Budimex,Construction,GPW,TRUE
 MRC,Mercator Medical,Healthcare,GPW,FALSE
 WSE,Warsaw Stock Exchange,Finance,GPW,FALSE
 SNK,Sanok Rubber Company,Manufacturing,GPW,FALSE
+PEO,Bank Pekao,Banking,GPW,TRUE
+KRU,Kruk SA,Financial Services,GPW,FALSE
+BGS,Benefit Systems,HR/Fitness,GPW,FALSE
+CPS,Cyfrowy Polsat,Media/Telecom,GPW,TRUE
+WPL,Wirtualna Polska,Media/Technology,GPW,TRUE
+AGO,Agora SA,Media,GPW,FALSE
+ATT,Atal SA,Real Estate,GPW,FALSE
+ECH,Echo Investment,Real Estate,GPW,TRUE
+ROB,Robyg SA,Real Estate,GPW,FALSE
+DVL,Develia SA,Real Estate,GPW,FALSE
+RBW,Rainbow Tours,Tourism,GPW,FALSE
+OBS,Orbis SA,Hotels,GPW,TRUE
+FTE,Forte SA,Manufacturing,GPW,TRUE
+WLT,Wielton SA,Manufacturing,GPW,FALSE
+FMF,Famur SA,Mining Equipment,GPW,TRUE
+SLV,Selvita,Biotech,GPW,FALSE
+MAB,Mabion SA,Pharma,GPW,FALSE
+BST,BEST SA,Financial Services,GPW,FALSE
+UNI,Unibep SA,Construction,GPW,TRUE
+TOR,Torpol SA,Construction,GPW,FALSE
+ZWC,Żywiec Group,FMCG,GPW,TRUE
+JPM,JPMorgan Chase,Banking,USA,TRUE
+NFLX,Netflix,Entertainment,USA,FALSE
+AMD,AMD,Semiconductors,USA,FALSE
+BAC,Bank of America,Banking,USA,TRUE
