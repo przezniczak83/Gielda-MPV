@@ -101,3 +101,43 @@ ARM,ARM Holdings,Semiconductors,USA,FALSE
 ASML,ASML,Semiconductors,USA,FALSE
 TSM,TSMC,Semiconductors,USA,TRUE
 ORCL,Oracle,Enterprise,USA,TRUE
+MIL,Bank Millennium,Banking,GPW,FALSE
+BHW,Bank Handlowy,Banking,GPW,FALSE
+SAN,Santander Bank Polska,Banking,GPW,TRUE
+PXM,Polimex-Mostostal,Construction,GPW,TRUE
+STX,Stalexport Autostrady,Infrastructure,GPW,FALSE
+ZPC,Wawel SA,FMCG,GPW,FALSE
+AMB,AmRest Holdings,Restaurants,GPW,TRUE
+PKM,PKM Duda,Food,GPW,TRUE
+TIM,TIM SA,Wholesale,GPW,FALSE
+KGN,Cognor Holding,Steel,GPW,FALSE
+FTI,Ferro SA,Manufacturing,GPW,FALSE
+MID,Mirbud SA,Construction,GPW,FALSE
+EAT,Eurocash SA,Wholesale,GPW,TRUE
+NBR,Netia SA,Telecom,GPW,FALSE
+HEJ,Helio SA,Food,GPW,FALSE
+INTC,Intel,Semiconductors,USA,TRUE
+IBM,IBM,Technology,USA,TRUE
+QCOM,Qualcomm,Semiconductors,USA,FALSE
+MU,Micron Technology,Semiconductors,USA,FALSE
+ADBE,Adobe,Software,USA,FALSE
+UBER,Uber,Technology,USA,FALSE
+ABNB,Airbnb,Travel,USA,FALSE
+COIN,Coinbase,FinTech,USA,FALSE
+SQ,Block Inc,FinTech,USA,FALSE
+WMT,Walmart,Retail,USA,TRUE
+HD,Home Depot,Retail,USA,FALSE
+NKE,Nike,Consumer,USA,FALSE
+DIS,Disney,Entertainment,USA,TRUE
+AMGN,Amgen,Biotech,USA,FALSE
+JNJ,Johnson & Johnson,Healthcare,USA,TRUE
+PFE,Pfizer,Pharma,USA,FALSE
+MRNA,Moderna,Biotech,USA,FALSE
+BABA,Alibaba,E-commerce,USA,TRUE
+BRK,Berkshire Hathaway,Finance,USA,TRUE
+GS,Goldman Sachs,Banking,USA,TRUE
+MS,Morgan Stanley,Banking,USA,TRUE
+T,AT&T,Telecom,USA,TRUE
+VZ,Verizon,Telecom,USA,TRUE
+XOM,ExxonMobil,Energy,USA,TRUE
+RIVN,Rivian,Automotive,USA,FALSE
