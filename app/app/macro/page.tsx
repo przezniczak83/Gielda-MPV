@@ -4,7 +4,7 @@
 import { createClient } from "@supabase/supabase-js";
 import MacroInterpretation from "../components/MacroInterpretation";
 
-export const revalidate = 3600; // 1h — macro data changes ~every 6h
+export const revalidate = 60; // 1h — macro data changes ~every 6h
 
 interface MacroRow {
   id:         number;
