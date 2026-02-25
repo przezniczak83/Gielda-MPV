@@ -1,8 +1,11 @@
 // supabase/functions/fetch-prices/index.ts
 // Hybrid price fetcher with multi-source fallback chain.
 //
-// GPW chain:  Twelve Data → EODHD → Stooq → Yahoo Finance
+// GPW chain:  Railway/Stooq → EODHD → Twelve Data → Yahoo Finance
 // USA chain:  FMP → Twelve Data → Alpha Vantage → Yahoo Finance
+//
+// Railway is the PRIMARY GPW source — it bypasses Edge Function IP blocks
+// that affect direct Stooq fetches from EF servers.
 //
 // Each source is tried in order; first one returning rows wins.
 // source field stored in price_history for diagnostics.
@@ -60,6 +63,39 @@ function parseInt_(v: unknown): number | null {
 }
 
 const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// ─── Railway/Stooq (GPW PRIMARY — bypasses EF IP blocks) ─────────────────────
+
+async function fetchRailwayGPW(ticker: string): Promise<OHLCV[]> {
+  const baseUrl = Deno.env.get("RAILWAY_SCRAPER_URL") ?? "";
+  const apiKey  = Deno.env.get("RAILWAY_SCRAPER_KEY") ?? "";
+  if (!baseUrl) throw new Error("RAILWAY_SCRAPER_URL not set");
+
+  const url = `${baseUrl}/prices/gpw/history?ticker=${encodeURIComponent(ticker)}&days=30`;
+  const res  = await fetch(url, {
+    headers: { "X-API-Key": apiKey },
+    signal:  AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`Railway returned ${res.status}`);
+
+  const json = await res.json() as {
+    ok:   boolean;
+    data: Array<{ date: string; close: number | null; volume: number | null }>;
+    error?: string;
+  };
+
+  if (!json.ok) throw new Error(json.error ?? "Railway error");
+  if (!json.data?.length) return [];
+
+  return json.data.map(r => ({
+    date:   r.date,
+    open:   null,
+    high:   null,
+    low:    null,
+    close:  r.close,
+    volume: r.volume,
+  }));
+}
 
 // ─── Twelve Data (GPW: {ticker}.WAR, USA: {ticker}) ──────────────────────────
 
@@ -281,9 +317,9 @@ async function fetchYahoo(symbol: string): Promise<OHLCV[]> {
 // ─── Fallback chain orchestrator ──────────────────────────────────────────────
 
 const GPW_CHAIN: [string, FetcherFn][] = [
-  ["twelve_data", fetchTwelveDataGPW],
+  ["stooq",       fetchRailwayGPW],    // Railway proxy — bypasses EF IP blocks
   ["eodhd",       fetchEODHD],
-  ["stooq",       fetchStooq],
+  ["twelve_data", fetchTwelveDataGPW],
   ["yahoo",       fetchYahooGPW],
 ];
 
