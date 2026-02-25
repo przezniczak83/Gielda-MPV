@@ -4,11 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const links = [
-  { href: "/",           label: "Dashboard"      },
-  { href: "/companies",  label: "Spółki"         },
-  { href: "/alerts",     label: "Alerty"         },
-  { href: "/upload",     label: "Wgraj raport"   },
-  { href: "/api/health", label: "Status systemu" },
+  { href: "/",            label: "Dashboard"      },
+  { href: "/companies",   label: "Spółki"         },
+  { href: "/watchlists",  label: "Watchlisty"     },
+  { href: "/alerts",      label: "Alerty"         },
+  { href: "/upload",      label: "Wgraj raport"   },
+  { href: "/api/health",  label: "Status systemu" },
 ];
 
 export default function Nav() {
