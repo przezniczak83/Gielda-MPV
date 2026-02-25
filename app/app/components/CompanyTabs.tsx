@@ -69,6 +69,14 @@ const AiChat = dynamic(
   },
 );
 
+const SentimentWidget = dynamic(
+  () => import("./SentimentWidget"),
+  {
+    loading: () => <div className="h-28 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
 type Event = {
@@ -212,6 +220,7 @@ export default function CompanyTabs({
             <PriceChart ticker={ticker} />
           </div>
           <HealthOverview ticker={ticker} />
+          <SentimentWidget ticker={ticker} />
           <OwnershipWidget ticker={ticker} />
         </div>
       )}

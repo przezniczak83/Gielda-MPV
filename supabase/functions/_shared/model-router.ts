@@ -11,6 +11,8 @@ export const MODELS = {
   red_flags:           "claude-haiku-4-5-20251001",
   dividend:            "claude-haiku-4-5-20251001",
   earnings_quality:    "claude-haiku-4-5-20251001",
+  sentiment_analysis:  "claude-haiku-4-5-20251001",
+  macro_interpretation: "claude-haiku-4-5-20251001",
 
   // Najlepsze — złożona analiza
   ai_chat:             "claude-sonnet-4-20250514",
