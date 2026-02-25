@@ -2,10 +2,10 @@
 // Insider transaction tracker for GPW.
 //
 // Data source strategy:
-//   1. GPW Ajax API (https://www.gpw.pl/ajaxindex.php?action=GPWTransakcjeInsiderow)
-//      — likely blocked from Edge Function IPs (same IP block as stooq.pl)
-//   2. Bankier.pl RSS insider feed
-//      — https://www.bankier.pl/rss/insider.xml (returns empty currently)
+//   1. Railway scraper (https://gielda-mpv-production.up.railway.app/insider)
+//      — bypasses Edge Function IP blocks via Cheerio HTML scraper on Railway
+//   2. GPW Ajax API (https://www.gpw.pl/ajaxindex.php?action=GPWTransakcjeInsiderow)
+//      — likely blocked from Edge Function IPs, kept as secondary attempt
 //   3. ESPI pipeline fallback — scan company_events for insider keywords
 //      (MAR Art. 19 filings: "transakcja menedżera", "nabycie", "zbycie")
 //
@@ -97,7 +97,74 @@ function extractPersonName(title: string): string | null {
   return m ? m[1] : null;
 }
 
-// ─── Source 1: GPW Ajax API ───────────────────────────────────────────────────
+// ─── Source 1: Railway scraper ────────────────────────────────────────────────
+
+async function fetchFromRailway(): Promise<InsiderTransaction[]> {
+  const baseUrl = Deno.env.get("RAILWAY_SCRAPER_URL") ?? "";
+  const apiKey  = Deno.env.get("RAILWAY_SCRAPER_KEY") ?? "";
+  if (!baseUrl) throw new Error("RAILWAY_SCRAPER_URL not set");
+
+  const res = await fetch(`${baseUrl}/insider`, {
+    headers: { "X-API-Key": apiKey },
+    signal:  AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`Railway returned ${res.status}`);
+
+  const json = await res.json() as {
+    ok:    boolean;
+    count: number;
+    data:  Array<{
+      raw?:    string[];
+      date?:   string | null;
+      company?: string | null;
+      person?: string | null;
+      type?:   string | null;
+      price?:  number | null;
+      volume?: number | null;
+      value?:  number | null;
+    }>;
+    error?: string;
+  };
+
+  if (!json.ok) throw new Error(json.error ?? "Railway insider error");
+  if (!json.data?.length) return [];
+
+  const rows: InsiderTransaction[] = [];
+
+  for (const item of json.data) {
+    // Railway scraper returns raw cells — try to parse ticker from company field
+    const companyRaw = item.company ?? "";
+    // Ticker is typically an all-caps 2-6 char word, or embedded in raw[0]
+    const tickerMatch = companyRaw.match(/\b([A-Z0-9]{2,6})\b/);
+    const ticker = tickerMatch ? tickerMatch[1] : companyRaw.slice(0, 6).toUpperCase().trim();
+    if (!ticker || ticker.length < 2) continue;
+
+    const txType = item.type
+      ? (item.type.toLowerCase().includes("naby") || item.type.toLowerCase().includes("buy") ? "BUY"
+        : item.type.toLowerCase().includes("zbyc") || item.type.toLowerCase().includes("sell") ? "SELL"
+        : detectTransactionType(item.type))
+      : null;
+
+    if (!txType) continue;
+
+    rows.push({
+      ticker:           ticker,
+      person_name:      item.person ?? null,
+      role:             null,
+      transaction_type: txType,
+      shares_count:     item.volume ?? null,
+      value_pln:        item.value  ?? null,
+      transaction_date: item.date   ?? null,
+      source:           "railway",
+      event_id:         null,
+    });
+  }
+
+  if (rows.length === 0) throw new Error("Railway returned 0 parseable insider rows");
+  return rows;
+}
+
+// ─── Source 2: GPW Ajax API ───────────────────────────────────────────────────
 
 async function fetchFromGPW(): Promise<InsiderTransaction[]> {
   const url = "https://www.gpw.pl/ajaxindex.php?action=GPWTransakcjeInsiderow&start=0&limit=20&lang=PL";
@@ -227,14 +294,26 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   let transactions: InsiderTransaction[] = [];
   let sourceUsed = "none";
 
-  // Try GPW first (likely blocked from EF IPs — see lessons-learned.md)
+  // Try Railway first (bypasses EF IP blocks via Cheerio scraper on Railway)
   try {
-    transactions = await fetchFromGPW();
-    sourceUsed   = "gpw";
-    console.log(`[fetch-insider] GPW: ${transactions.length} transactions`);
+    transactions = await fetchFromRailway();
+    sourceUsed   = "railway";
+    console.log(`[fetch-insider] Railway: ${transactions.length} transactions`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[fetch-insider] GPW failed (expected from EF IPs): ${msg}`);
+    console.warn(`[fetch-insider] Railway failed: ${msg}`);
+  }
+
+  // Fallback: GPW Ajax API (likely blocked from EF IPs but worth trying)
+  if (transactions.length === 0) {
+    try {
+      transactions = await fetchFromGPW();
+      sourceUsed   = "gpw";
+      console.log(`[fetch-insider] GPW Ajax: ${transactions.length} transactions`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[fetch-insider] GPW failed (expected from EF IPs): ${msg}`);
+    }
   }
 
   // Fallback: ESPI pipeline
