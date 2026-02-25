@@ -158,6 +158,61 @@ watchlist. Store ALL real records (even non-watchlist), let process-raw filter.
 
 ---
 
+## Telegram Bot API
+
+### 2026-02-25 — Telegram sendMessage works from Edge Functions
+
+**Result:** `https://api.telegram.org/bot{TOKEN}/sendMessage` is accessible
+from Supabase Edge Function IPs.
+
+**Pattern:** POST with `{chat_id, text, parse_mode: "Markdown"}`.
+
+**Rate limiting:** Add 300ms sleep between consecutive messages to avoid
+Telegram 429 (Too Many Requests).
+
+**Markdown note:** Escape special chars in untrusted text fields. Use
+`parse_mode: "Markdown"` (v1) for simple bold/italic — v1 is more lenient
+than MarkdownV2.
+
+---
+
+## Idempotent Alerts Pattern
+
+### 2026-02-25 — alerted_at column for idempotent alert delivery
+
+**Pattern:** Add `alerted_at timestamptz` column to any table that triggers
+alerts. On each cron run, query `WHERE alerted_at IS NULL`. After successful
+send, `UPDATE SET alerted_at = now()`.
+
+**Benefit:** Re-running the function never double-sends. Crash-safe: if send
+succeeds but UPDATE fails, alert will re-send on next run (at-least-once
+semantics — acceptable for stock alerts).
+
+**Index:** `CREATE INDEX ... WHERE alerted_at IS NOT NULL` (partial index) for
+queries on already-alerted rows.
+
+---
+
+## Insider Transactions Data Sources
+
+### 2026-02-25 — GPW insider transactions page blocks Edge Function IPs
+
+**Problem:**
+`https://www.gpw.pl/transakcje-insiderow` and the Ajax API
+`https://www.gpw.pl/ajaxindex.php?action=GPWTransakcjeInsiderow` both
+block server-side requests (curl error 56 — connection reset by GPW's WAF).
+
+**Status:** `https://www.bankier.pl/rss/insider.xml` returns empty (HTTP 200
+but 0 bytes). JavaScript-rendered page, no public RSS.
+
+**Workaround:** Insider transactions in Poland are mandatory ESPI disclosures
+under MAR Art. 19 ("Powiadomienie o transakcji menedżera"). Our ESPI pipeline
+(Bankier RSS → raw_ingest → company_events) will capture these automatically
+when they're published. The `fetch-insider` function scans `company_events`
+for keywords: "transakcja menedżera", "nabycie", "zbycie", "art. 19".
+
+---
+
 ## AI & Prompt Engineering
 
 ### 2026-02-25 — Anthropic Claude Sonnet: primary for Polish text quality

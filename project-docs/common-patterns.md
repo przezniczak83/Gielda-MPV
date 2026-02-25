@@ -175,6 +175,75 @@ Deploy: `sed "s/SERVICE_ROLE_KEY_HERE/$SERVICE_ROLE_KEY/" file.sql | supabase db
 
 ---
 
+## Telegram Alert Pattern
+
+Used in send-alerts and fetch-insider Edge Functions.
+
+```typescript
+async function sendTelegram(token: string, chatId: string, text: string): Promise<void> {
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({
+      chat_id:    chatId,
+      text,
+      parse_mode: "Markdown",   // v1 — more lenient than MarkdownV2
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Telegram API ${res.status}: ${body}`);
+  }
+}
+```
+
+**Message format example:**
+```
+🚨 *ALERT GIEŁDOWY*
+📊 *PKN* (earnings)
+📝 Wyniki Q4 2025
+⚡ Impact: *8/10*
+📅 2026-02-25
+```
+
+**Rate limiting:** Add `sleep(300)` between consecutive sends.
+
+**Config:** `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in Supabase Secrets.
+
+---
+
+## Idempotent Alert Pattern (alerted_at IS NULL)
+
+Used in send-alerts, fetch-insider, early_recommendations.
+
+```typescript
+// 1. Query only unalerted records
+const { data: events } = await supabase
+  .from("company_events")
+  .select("id, ...")
+  .gte("impact_score", 7)
+  .is("alerted_at", null)           // NOT YET SENT
+  .gte("created_at", windowStart);  // time window
+
+// 2. Send alert
+await sendTelegram(token, chatId, message);
+
+// 3. Mark as alerted immediately after
+await supabase
+  .from("company_events")
+  .update({ alerted_at: new Date().toISOString() })
+  .eq("id", event.id);
+```
+
+**Schema:** `alerted_at timestamptz` column with partial index:
+```sql
+CREATE INDEX IF NOT EXISTS idx_company_events_alerted_at
+  ON company_events(alerted_at)
+  WHERE alerted_at IS NOT NULL;
+```
+
+---
+
 ## RSS Parsing Pattern (Deno / no DOM)
 
 Used in fetch-espi Edge Function. Regex-based RSS 2.0 parser (no DOMParser
