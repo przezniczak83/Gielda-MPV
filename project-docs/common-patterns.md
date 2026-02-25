@@ -453,6 +453,170 @@ return { date: last[0], open: +last[1], high: +last[2], low: +last[3], close: +l
 
 ---
 
+## NBP Exchange Rate Pattern
+
+```typescript
+async function fetchNBPRate(code: string): Promise<{ current: NBPRate; previous: NBPRate } | null> {
+  const url = `https://api.nbp.pl/api/exchangerates/rates/A/${code}/last/2/?format=json`;
+  const res  = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const rates = data.rates.sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
+  return { current: rates[rates.length - 1], previous: rates[rates.length - 2] };
+}
+
+// Change % calculation
+const changePct = ((current.mid - previous.mid) / previous.mid) * 100;
+```
+
+**Confirmed working currencies:** EUR, USD, GBP, CHF, JPY (table A rates only).
+**Confirmed NOT working:** `/api/cenycen/`, `/api/stopy/` — these endpoints don't exist.
+
+---
+
+## Sentiment Analysis Pattern (Claude Haiku JSON)
+
+```typescript
+const SYSTEM_PROMPT = [
+  "Odpowiadaj WYŁĄCZNIE w formacie JSON (bez komentarzy).",
+  "Format: { overall_score: -1.0..+1.0, overall_label: BULLISH|NEUTRAL|BEARISH,",
+  "  news_analysis: [{title, sentiment: positive|neutral|negative}], summary: string }",
+].join(" ");
+
+const raw = await callAnthropic("health_score", SYSTEM_PROMPT, [{ role: "user", content: eventList }], 600);
+const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+const result = JSON.parse(cleaned);
+
+// Clamp score to valid range
+const score = Math.max(-1, Math.min(1, Number(result.overall_score) || 0));
+const label = ["BULLISH", "NEUTRAL", "BEARISH"].includes(result.overall_label) ? result.overall_label : "NEUTRAL";
+```
+
+**Storage:** Upsert to `company_sentiment` table with `onConflict: "ticker"`.
+
+---
+
+## CSV Export Pattern
+
+```typescript
+function escape(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  if (s.includes(",") || s.includes('"') || s.includes("\n"))
+    return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function toCSV(rows: Record<string, unknown>[]): string {
+  if (!rows.length) return "";
+  const headers = Object.keys(rows[0]);
+  return [headers.join(","), ...rows.map(r => headers.map(h => escape(r[h])).join(","))].join("\r\n");
+}
+
+// Return as download
+return new Response(csv, {
+  headers: {
+    "Content-Type": "text/csv; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+  },
+});
+```
+
+---
+
+## Screener Pattern (JSONB client-side filter)
+
+For filtering on JSONB snapshot data — fetch all rows, filter in JS (up to ~200 companies):
+
+```typescript
+// Fetch all snapshots
+const { data } = await db.from("company_snapshot").select("ticker, snapshot, computed_at").limit(200);
+
+// Filter client-side
+let rows = data ?? [];
+if (market !== "ALL") rows = rows.filter(r => r.snapshot.company?.market === market);
+if (health_min !== undefined) rows = rows.filter(r => (r.snapshot.kpis?.health_score ?? null) >= health_min);
+if (price_max !== undefined) rows = rows.filter(r => (r.snapshot.price?.close ?? null) <= price_max);
+
+// Sort + limit
+rows.sort((a, b) => sort_dir * (getValue(a) - getValue(b)));
+rows = rows.slice(0, limit);
+```
+
+**When to switch to SQL:** If companies exceed ~1000, switch to PostgreSQL JSONB operators:
+`WHERE (snapshot->>'kpis')::jsonb->>'health_score')::numeric >= $1`
+
+---
+
+## Anthropic Streaming SSE Proxy Pattern (Next.js → Client)
+
+```typescript
+// Route handler (app/api/ai-query/route.ts)
+const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+  body: JSON.stringify({ model, max_tokens: 500, stream: true, system, messages }),
+  headers: { "anthropic-version": "2023-06-01", "x-api-key": apiKey }
+});
+
+// Forward SSE stream directly to client
+return new Response(anthropicRes.body, {
+  headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" },
+});
+
+// Client-side consumer (AiChat.tsx)
+const reader = res.body!.getReader();
+let buffer = "";
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  buffer += decoder.decode(value, { stream: true });
+  const lines = buffer.split("\n");
+  buffer = lines.pop() ?? "";
+  for (const line of lines) {
+    if (!line.startsWith("data: ")) continue;
+    const parsed = JSON.parse(line.slice(6).trim());
+    if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta")
+      answer += parsed.delta.text;
+  }
+}
+```
+
+---
+
+## localStorage Favorites/Recently Visited Pattern
+
+```typescript
+// app/lib/storage.ts
+const FAVORITES_KEY = "gm_favorites";
+const RECENT_KEY    = "gm_recent";
+
+export function isFavorite(ticker: string): boolean {
+  if (typeof window === "undefined") return false;
+  return JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? "[]").includes(ticker);
+}
+
+export function toggleFavorite(ticker: string): boolean {
+  const favs = JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? "[]");
+  const idx  = favs.indexOf(ticker);
+  if (idx === -1) { favs.push(ticker); } else { favs.splice(idx, 1); }
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+  window.dispatchEvent(new CustomEvent("favorites-changed")); // notify other components
+  return idx === -1;
+}
+
+export function trackVisit(ticker: string, name: string): void {
+  if (typeof window === "undefined") return;
+  const recent = getRecentCompanies().filter(r => r.ticker !== ticker);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(
+    [{ ticker, name, visitedAt: new Date().toISOString() }, ...recent].slice(0, 8)
+  ));
+}
+```
+
+**SSR guard:** Always check `typeof window === "undefined"` before localStorage access.
+**Cross-component sync:** Use `CustomEvent("favorites-changed")` + `addEventListener`.
+
+---
+
 ## Health Check Pattern
 
 Parallel stats query with `Promise.allSettled` for resilience:

@@ -314,6 +314,99 @@ recharts is listed in `app/package.json` dependencies.
 
 ---
 
+### 2026-02-25 — NBP API: only exchange rate endpoints are real
+
+**Problem:**
+Task spec referenced `/api/cenycen/format/json` and `/api/stopy/format/json` as NBP endpoints
+for CPI and interest rates. These URLs do NOT exist on api.nbp.pl (404).
+
+**Confirmed working:**
+`https://api.nbp.pl/api/exchangerates/rates/A/{EUR|USD|GBP|CHF}/last/2/?format=json`
+Returns `{currency, code, rates:[{no, effectiveDate, mid}]}`.
+
+**Pattern:** Fetch last/2 to get current + previous rate for change% calculation.
+Sort rates by effectiveDate ascending — last element is most recent.
+
+**WIBOR/CPI:** Not available from NBP API. Would require separate data sources
+(e.g., GUS API for CPI, money market feeds for WIBOR). Document and skip.
+
+---
+
+### 2026-02-25 — FRED API: skip when no key, document in lessons-learned
+
+**Pattern:** If FRED_API_KEY missing, skip FRED section entirely. Don't crash, don't
+throw — log a warning, return partial data. Document in lessons-learned.md.
+
+**Applied to:** fetch-macro EF — FRED section omitted, NBP-only implementation.
+
+---
+
+### 2026-02-25 — Anthropic SSE streaming: buffer-based line parser required
+
+**Problem:** SSE events from Anthropic `stream: true` can arrive split across
+multiple TCP chunks. Naive line splitting loses partial lines.
+
+**Fix:**
+```typescript
+let buffer = "";
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  buffer += decoder.decode(value, { stream: true });
+  const lines = buffer.split("\n");
+  buffer = lines.pop() ?? "";   // keep last incomplete line
+  for (const line of lines) {
+    if (!line.startsWith("data: ")) continue;
+    const parsed = JSON.parse(line.slice(6).trim());
+    if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta") {
+      answer += parsed.delta.text;
+    }
+  }
+}
+```
+
+---
+
+### 2026-02-25 — Anthropic Prompt Caching: direct fetch, not callAnthropic() helper
+
+**Problem:** `_shared/anthropic.ts` → `callAnthropic()` doesn't support the caching
+API format (array-format system blocks with `cache_control`).
+
+**Fix:** Bypass the helper, call the Anthropic API directly with:
+```typescript
+headers: { "anthropic-beta": "prompt-caching-2024-07-31" }
+system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }]
+messages: [{
+  role: "user",
+  content: [
+    { type: "text", text: context, cache_control: { type: "ephemeral" } }, // cached
+    { type: "text", text: question },  // NOT cached — different every request
+  ],
+}]
+```
+**Savings:** 83% cost reduction for repeated queries on same ticker (context cached).
+
+---
+
+### 2026-02-25 — company_snapshot: snapshot-first pattern (1 query vs 7)
+
+**Pattern:** On every page load, try `company_snapshot` first (1 query, ~1ms).
+If fresh (<30 min), use the denormalized JSON. Otherwise fall back to 5-7 live queries.
+Apply the same freshness check (`isFresh(computed_at, 30)`) in both Next.js routes and EFs.
+
+**ISR synergy:** ISR cache (5 min) + snapshot freshness (30 min) = pages rarely touch live DB.
+
+---
+
+### 2026-02-25 — localStorage for client-only state (favorites, recently visited)
+
+**Pattern:** For UI state that doesn't need to be in the DB (favorites, recent visits),
+use localStorage with safe SSR guards (`if (typeof window === "undefined") return []`).
+Emit CustomEvents (`favorites-changed`) to sync across mounted components.
+Use a shared `app/lib/storage.ts` module for all localStorage operations.
+
+---
+
 ### 2026-02-25 — Gemini PDF extraction: use `response_mime_type: application/json`
 
 **Lesson:**
