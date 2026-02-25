@@ -5,13 +5,14 @@
 // Idempotentne: po wysłaniu ustawia alerted_at = now().
 // Cron: */5 * * * * (co 5 minut)
 //
-// Wymagane Secrets:
-//   TELEGRAM_BOT_TOKEN — token bota (@BotFather)
-//   TELEGRAM_CHAT_ID   — chat_id odbiorcy / grupy
-//
 // Deploy: supabase functions deploy send-alerts --project-ref pftgmorsthoezhmojjpg
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getSupabaseClient } from "../_shared/supabase-client.ts";
+import { createLogger }      from "../_shared/logger.ts";
+import { sendTelegram }      from "../_shared/telegram.ts";
+import { okResponse, errorResponse } from "../_shared/response.ts";
+
+const log = createLogger("send-alerts");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,25 +26,7 @@ interface EventRow {
   url:          string | null;
 }
 
-// ─── Telegram helper ─────────────────────────────────────────────────────────
-
-async function sendTelegram(token: string, chatId: string, text: string): Promise<void> {
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
-  const res  = await fetch(url, {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({
-      chat_id:    chatId,
-      text,
-      parse_mode: "Markdown",
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Telegram API ${res.status}: ${body}`);
-  }
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Format event as Telegram message. */
 function formatMessage(e: EventRow): string {
@@ -58,17 +41,13 @@ function formatMessage(e: EventRow): string {
     `⚡ Impact: *${scoreStr}*`,
     `📅 ${dateStr}`,
   ];
-
   if (e.url) lines.push(e.url);
-
   return lines.join("\n");
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const MIN_IMPACT_SCORE = 7;
 const WINDOW_HOURS     = 24;
-const SLEEP_MS         = 300; // pause between Telegram messages to avoid rate limit
+const SLEEP_MS         = 300;
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
@@ -77,29 +56,22 @@ function sleep(ms: number): Promise<void> {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (_req: Request): Promise<Response> => {
-  console.log("[send-alerts] Invoked at:", new Date().toISOString());
+  log.info("Invoked at:", new Date().toISOString());
 
-  const supabaseUrl  = Deno.env.get("SUPABASE_URL")              ?? "";
-  const serviceKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  const tgToken      = Deno.env.get("TELEGRAM_BOT_TOKEN")        ?? "";
-  const tgChatId     = Deno.env.get("TELEGRAM_CHAT_ID")          ?? "";
-
-  if (!supabaseUrl || !serviceKey) {
-    return new Response(
-      JSON.stringify({ ok: false, error: "Missing Supabase env vars" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    );
+  let supabase;
+  try {
+    supabase = getSupabaseClient();
+  } catch (err) {
+    return errorResponse(err instanceof Error ? err.message : String(err));
   }
+
+  const tgToken  = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
+  const tgChatId = Deno.env.get("TELEGRAM_CHAT_ID")   ?? "";
 
   if (!tgToken || !tgChatId) {
-    console.warn("[send-alerts] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — skipping");
-    return new Response(
-      JSON.stringify({ ok: true, sent: 0, skipped_reason: "telegram_not_configured", ts: new Date().toISOString() }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
+    log.warn("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — skipping");
+    return okResponse({ sent: 0, skipped_reason: "telegram_not_configured" });
   }
-
-  const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
   // ── Fetch unalerted high-impact events ────────────────────────────────────
   const windowStart = new Date(Date.now() - WINDOW_HOURS * 3600 * 1000).toISOString();
@@ -114,21 +86,15 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     .order("created_at",   { ascending: true });
 
   if (fetchErr) {
-    console.error("[send-alerts] Fetch error:", fetchErr.message);
-    return new Response(
-      JSON.stringify({ ok: false, error: fetchErr.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    );
+    log.error("Fetch error:", fetchErr.message);
+    return errorResponse(fetchErr.message);
   }
 
   const rows = (events ?? []) as EventRow[];
-  console.log(`[send-alerts] Found ${rows.length} unalerted event(s) with score >= ${MIN_IMPACT_SCORE}`);
+  log.info(`Found ${rows.length} unalerted event(s) with score >= ${MIN_IMPACT_SCORE}`);
 
   if (rows.length === 0) {
-    return new Response(
-      JSON.stringify({ ok: true, sent: 0, ts: new Date().toISOString() }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
+    return okResponse({ sent: 0 });
   }
 
   // ── Send and mark ─────────────────────────────────────────────────────────
@@ -138,34 +104,29 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   for (const event of rows) {
     try {
       const message = formatMessage(event);
-      await sendTelegram(tgToken, tgChatId, message);
+      const ok      = await sendTelegram(message);
 
-      // Mark as alerted
+      if (!ok) throw new Error("sendTelegram returned false");
+
       const { error: updateErr } = await supabase
         .from("company_events")
         .update({ alerted_at: new Date().toISOString() })
         .eq("id", event.id);
 
       if (updateErr) {
-        console.warn(`[send-alerts] id=${event.id} alerted_at update failed: ${updateErr.message}`);
+        log.warn(`id=${event.id} alerted_at update failed:`, updateErr.message);
       }
 
       sent++;
-      console.log(`[send-alerts] Sent alert for ${event.ticker} id=${event.id} score=${event.impact_score}`);
+      log.info(`Sent alert for ${event.ticker} id=${event.id} score=${event.impact_score}`);
 
       if (sent < rows.length) await sleep(SLEEP_MS);
-
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[send-alerts] id=${event.id} failed: ${msg}`);
+      log.error(`id=${event.id} failed:`, err instanceof Error ? err.message : String(err));
       failed++;
     }
   }
 
-  console.log(`[send-alerts] Done: sent=${sent} failed=${failed}`);
-
-  return new Response(
-    JSON.stringify({ ok: true, sent, failed, ts: new Date().toISOString() }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
-  );
+  log.info(`Done: sent=${sent} failed=${failed}`);
+  return okResponse({ sent, failed });
 });
