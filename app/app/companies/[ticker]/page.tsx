@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import AiChat from "@/app/components/AiChat";
 
 export const dynamic = "force-dynamic";
 
@@ -115,30 +116,26 @@ export default async function CompanyPage({
           )}
         </div>
 
-        {/* Price + AI row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
-          {/* Aktualna cena */}
-          <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-5 py-4">
-            <div className="text-xs text-gray-500 font-medium mb-1">Ostatnia cena</div>
+        {/* Price bar */}
+        <div className="mb-6">
+          <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-5 py-4 inline-flex items-baseline gap-3">
+            <span className="text-xs text-gray-500 font-medium">Ostatnia cena</span>
             {latestPrice ? (
-              <div className="flex items-baseline gap-2">
+              <>
                 <span className="text-2xl font-bold text-white tabular-nums">
                   {Number(latestPrice.close).toFixed(2)} PLN
                 </span>
                 <span className="text-xs text-gray-500">{latestPrice.date}</span>
-              </div>
+              </>
             ) : (
-              <div className="text-gray-600 text-sm">Brak danych cenowych</div>
+              <span className="text-gray-600 text-sm">Brak danych</span>
             )}
           </div>
+        </div>
 
-          {/* AI Analiza placeholder */}
-          <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-5 py-4">
-            <div className="text-xs text-gray-500 font-medium mb-1">AI Analiza</div>
-            <div className="text-sm text-gray-500">
-              🔄 AI chat będzie dostępny po konfiguracji API
-            </div>
-          </div>
+        {/* AI Chat */}
+        <div className="mb-10">
+          <AiChat ticker={ticker} />
         </div>
 
         {/* Events */}
