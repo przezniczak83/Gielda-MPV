@@ -65,7 +65,7 @@ export default async function CompanyPage({
   const { ticker: rawTicker } = await params;
   const ticker = rawTicker.toUpperCase();
 
-  const [{ data: company }, { data: events }] = await Promise.all([
+  const [{ data: company }, { data: events }, { data: latestPrice }] = await Promise.all([
     supabase
       .from("companies")
       .select("ticker, name, sector, market")
@@ -77,6 +77,13 @@ export default async function CompanyPage({
       .eq("ticker", ticker)
       .order("published_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("price_history")
+      .select("close, date")
+      .eq("ticker", ticker)
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   if (!company) notFound();
@@ -106,6 +113,32 @@ export default async function CompanyPage({
           {company.sector && (
             <div className="mt-1 text-sm text-gray-500">{company.sector}</div>
           )}
+        </div>
+
+        {/* Price + AI row */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
+          {/* Aktualna cena */}
+          <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-5 py-4">
+            <div className="text-xs text-gray-500 font-medium mb-1">Ostatnia cena</div>
+            {latestPrice ? (
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold text-white tabular-nums">
+                  {Number(latestPrice.close).toFixed(2)} PLN
+                </span>
+                <span className="text-xs text-gray-500">{latestPrice.date}</span>
+              </div>
+            ) : (
+              <div className="text-gray-600 text-sm">Brak danych cenowych</div>
+            )}
+          </div>
+
+          {/* AI Analiza placeholder */}
+          <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-5 py-4">
+            <div className="text-xs text-gray-500 font-medium mb-1">AI Analiza</div>
+            <div className="text-sm text-gray-500">
+              🔄 AI chat będzie dostępny po konfiguracji API
+            </div>
+          </div>
         </div>
 
         {/* Events */}

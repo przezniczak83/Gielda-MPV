@@ -1,409 +1,252 @@
-"use client";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 
-import React, { useEffect, useMemo, useState } from "react";
+export const dynamic = "force-dynamic";
 
-type NewsRow = {
-  id: string;
-  ticker: string;
-  title: string;
-  source: string | null;
-  url: string | null;
-  published_at: string | null;
-  created_at: string | null;
-  impact_score: number | null;
-  category: string | null;
-};
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type ApiListResponse = {
-  data: NewsRow[];
-  error: string | null;
-  meta?: {
-    limit: number;
-    offset: number;
-    returned: number;
-  };
-};
-
-type ApiInsertResponse = {
-  data: NewsRow | null;
-  error: string | null;
-};
-
-function toLocalDateTime(iso: string | null | undefined) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
+function formatDate(iso: string | null) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("pl-PL", {
+    day:   "2-digit",
+    month: "short",
+    year:  "numeric",
+  });
 }
 
-/**
- * Akceptuje:
- * - "AAPL, TSLA"
- * - "AAPL TSLA"
- * - "AAPL/TSLA"
- * - "AAPL;TSLA"
- * - "AAPL | TSLA"
- * Zwraca: ["AAPL","TSLA"]
- */
-function parseTickers(input: string): string[] {
-  const raw = (input || "")
-    .toUpperCase()
-    .replaceAll("|", ",")
-    .replaceAll("/", ",")
-    .replaceAll(";", ",")
-    .replaceAll("\n", ",")
-    .split(/[\s,]+/g)
-    .map((x) => x.trim())
-    .filter(Boolean);
+function formatDateTime(iso: string | null) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("pl-PL", {
+    day:    "2-digit",
+    month:  "short",
+    hour:   "2-digit",
+    minute: "2-digit",
+  });
+}
 
-  // dedupe, zachowaj kolejność
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const t of raw) {
-    if (!seen.has(t)) {
-      seen.add(t);
-      out.push(t);
-    }
+function ImpactBadge({ score }: { score: number | null }) {
+  if (score === null) return <span className="text-gray-600 text-xs">—</span>;
+
+  let cls: string;
+  if (score >= 7) {
+    cls = "bg-red-500/15 text-red-400 border border-red-500/25";
+  } else if (score >= 4) {
+    cls = "bg-yellow-500/15 text-yellow-400 border border-yellow-500/25";
+  } else {
+    cls = "bg-gray-500/15 text-gray-400 border border-gray-500/25";
   }
-  return out;
-}
-
-export default function Page() {
-  /**
-   * API base URL:
-   * - default: ""  => relative calls like /api/news (Vercel, local)
-   * - optional: set NEXT_PUBLIC_API_BASE_URL="https://gielda-mpv.vercel.app"
-   */
-  const API_BASE_URL =
-    (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
-
-  const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
-
-  // ---- FORM
-  const [ticker, setTicker] = useState("AAPL");
-  const [title, setTitle] = useState("Test news item");
-  const [source, setSource] = useState("manual");
-  const [url, setUrl] = useState("https://example.com");
-  const [published, setPublished] = useState("2026-02-22T03:30:00Z");
-  const [impact, setImpact] = useState("5");
-  const [category, setCategory] = useState("test");
-
-  const [message, setMessage] = useState<{
-    kind: "ok" | "err";
-    text: string;
-  } | null>(null);
-  const clearMessage = () => setMessage(null);
-
-  // ---- LIST / FILTER
-  const [filterInput, setFilterInput] = useState("AAPL, TSLA");
-  const tickers = useMemo(() => parseTickers(filterInput), [filterInput]);
-
-  const [limit, setLimit] = useState(25);
-  const [offset, setOffset] = useState(0);
-
-  const [rows, setRows] = useState<NewsRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [lastQuery, setLastQuery] = useState("");
-
-  const buildListUrl = () => {
-    const params = new URLSearchParams();
-    for (const t of tickers) params.append("ticker", t);
-    params.set("limit", String(limit));
-    params.set("offset", String(offset));
-    return apiUrl(`/api/news?${params.toString()}`);
-  };
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const listUrl = buildListUrl();
-      setLastQuery(listUrl);
-
-      const res = await fetch(listUrl, { method: "GET" });
-
-      // Jeśli backend zwróci HTML (np. 404), res.json() wywali "Unexpected token <"
-      // więc łapiemy to czytelnie:
-      const text = await res.text();
-      let json: ApiListResponse | null = null;
-      try {
-        json = JSON.parse(text) as ApiListResponse;
-      } catch {
-        json = { data: [], error: `Nie-JSON response (${res.status}). Próbowałem: ${listUrl}` };
-      }
-
-      if (!res.ok || json.error) {
-        setRows([]);
-        setMessage({
-          kind: "err",
-          text: json.error || `Błąd pobierania (${res.status})`,
-        });
-        return;
-      }
-
-      setRows(json.data || []);
-    } catch (e: any) {
-      setRows([]);
-      setMessage({ kind: "err", text: e?.message || "Błąd pobierania" });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    // auto-load on mount / when filter changes / pagination changes
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickers.join(","), limit, offset]);
-
-  const onAdd = async () => {
-    clearMessage();
-
-    const payload = {
-      ticker: ticker.trim().toUpperCase(),
-      title: title.trim(),
-      source: source.trim() || null,
-      url: url.trim() || null,
-      published_at: published.trim() || null,
-      impact_score: impact ? Number(impact) : null,
-      category: category.trim() || null,
-    };
-
-    try {
-      const postUrl = apiUrl("/api/news");
-
-      const res = await fetch(postUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const text = await res.text();
-      let json: ApiInsertResponse | null = null;
-      try {
-        json = JSON.parse(text) as ApiInsertResponse;
-      } catch {
-        json = { data: null, error: `Nie-JSON response (${res.status}). Próbowałem: ${postUrl}` };
-      }
-
-      if (!res.ok || json.error) {
-        setMessage({
-          kind: "err",
-          text: json.error || `Błąd (${res.status})`,
-        });
-        return;
-      }
-
-      setMessage({ kind: "ok", text: "OK: dodano wpis" });
-
-      // 1) po dodaniu wróć na pierwszą stronę wyników
-      setOffset(0);
-
-      // 2) i odśwież listę
-      await load();
-    } catch (e: any) {
-      setMessage({ kind: "err", text: e?.message || "Błąd zapisu" });
-    }
-  };
-
-  const styles = {
-    wrap: {
-      maxWidth: 1100,
-      margin: "40px auto",
-      padding: "0 16px",
-      fontFamily:
-        "system-ui, -apple-system, Segoe UI, Roboto, Arial",
-    } as React.CSSProperties,
-    h1: { fontSize: 28, marginBottom: 20 } as React.CSSProperties,
-    card: {
-      border: "1px solid #e5e7eb",
-      borderRadius: 12,
-      padding: 16,
-      marginBottom: 16,
-      background: "#fff",
-    } as React.CSSProperties,
-    row: {
-      display: "grid",
-      gridTemplateColumns: "160px 1fr",
-      gap: 12,
-      alignItems: "center",
-      marginBottom: 10,
-    } as React.CSSProperties,
-    label: { fontWeight: 600, color: "#111827" } as React.CSSProperties,
-    input: {
-      width: "100%",
-      padding: "10px 12px",
-      border: "1px solid #d1d5db",
-      borderRadius: 10,
-    } as React.CSSProperties,
-    btnRow: { display: "flex", gap: 10, marginTop: 12 } as React.CSSProperties,
-    btn: {
-      padding: "10px 14px",
-      borderRadius: 10,
-      border: "1px solid #111827",
-      background: "#111827",
-      color: "#fff",
-      cursor: "pointer",
-    } as React.CSSProperties,
-    btnGhost: {
-      padding: "10px 14px",
-      borderRadius: 10,
-      border: "1px solid #d1d5db",
-      background: "#fff",
-      cursor: "pointer",
-    } as React.CSSProperties,
-    msgOk: { marginTop: 10, color: "#16a34a", fontWeight: 600 } as React.CSSProperties,
-    msgErr: { marginTop: 10, color: "#dc2626", fontWeight: 600 } as React.CSSProperties,
-    filterRow: {
-      display: "grid",
-      gridTemplateColumns: "1fr 140px 120px 1fr",
-      gap: 10,
-      alignItems: "center",
-    } as React.CSSProperties,
-    small: { color: "#6b7280", fontSize: 12, marginTop: 6 } as React.CSSProperties,
-    table: { width: "100%", borderCollapse: "collapse" as const, marginTop: 12 } as React.CSSProperties,
-    th: { textAlign: "left" as const, padding: 10, borderBottom: "1px solid #e5e7eb", color: "#111827" } as React.CSSProperties,
-    td: { padding: 10, borderBottom: "1px solid #f3f4f6", verticalAlign: "top" as const } as React.CSSProperties,
-    pill: { fontSize: 12, padding: "2px 8px", borderRadius: 999, border: "1px solid #e5e7eb", color: "#374151" } as React.CSSProperties,
-    code: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 } as React.CSSProperties,
-  };
 
   return (
-    <div style={styles.wrap}>
-      <h1 style={styles.h1}>News</h1>
+    <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded-full tabular-nums ${cls}`}>
+      {score}
+    </span>
+  );
+}
 
-      <div style={styles.card}>
-        <div style={{ fontWeight: 700, marginBottom: 12 }}>Add news</div>
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-        <div style={styles.row}>
-          <div style={styles.label}>Ticker *</div>
-          <input style={styles.input} value={ticker} onChange={(e) => setTicker(e.target.value)} />
+type EventRow = {
+  ticker:       string;
+  title:        string;
+  event_type:   string | null;
+  impact_score: number | null;
+  published_at: string | null;
+};
+
+type TopCompany = {
+  ticker:    string;
+  avg_score: number;
+  events:    number;
+};
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default async function DashboardPage() {
+  const oneDayAgo    = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+
+  const [
+    { count: companyCount },
+    { count: eventsTodayCount },
+    { data: lastEventData },
+    { data: recentEvents },
+    { data: topEventsRaw },
+  ] = await Promise.all([
+    // Sekcja 1 — stats
+    supabase.from("companies").select("*", { count: "exact", head: true }),
+    supabase.from("company_events").select("*", { count: "exact", head: true }).gt("created_at", oneDayAgo),
+    supabase.from("company_events").select("created_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    // Sekcja 2 — last 20 events
+    supabase
+      .from("company_events")
+      .select("ticker, title, event_type, impact_score, published_at")
+      .order("created_at", { ascending: false })
+      .limit(20),
+    // Sekcja 3 — top companies (7d) — fetch raw, aggregate in JS
+    supabase
+      .from("company_events")
+      .select("ticker, impact_score")
+      .gt("created_at", sevenDaysAgo),
+  ]);
+
+  // Aggregate top companies
+  const tickerMap: Record<string, { sum: number; count: number }> = {};
+  for (const e of topEventsRaw ?? []) {
+    if (!tickerMap[e.ticker]) tickerMap[e.ticker] = { sum: 0, count: 0 };
+    tickerMap[e.ticker].sum   += e.impact_score ?? 0;
+    tickerMap[e.ticker].count += 1;
+  }
+  const topCompanies: TopCompany[] = Object.entries(tickerMap)
+    .map(([ticker, { sum, count }]) => ({
+      ticker,
+      avg_score: Math.round((sum / count) * 10) / 10,
+      events:    count,
+    }))
+    .sort((a, b) => b.avg_score - a.avg_score)
+    .slice(0, 5);
+
+  const lastUpdated = lastEventData?.created_at ?? null;
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-gray-100">
+      <div className="max-w-6xl mx-auto px-6 py-8">
+
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+          <p className="text-gray-500 text-sm mt-1">Aktualizacja: {formatDateTime(lastUpdated)}</p>
         </div>
 
-        <div style={styles.row}>
-          <div style={styles.label}>Title *</div>
-          <input style={styles.input} value={title} onChange={(e) => setTitle(e.target.value)} />
-        </div>
-
-        <div style={styles.row}>
-          <div style={styles.label}>Source *</div>
-          <input style={styles.input} value={source} onChange={(e) => setSource(e.target.value)} />
-        </div>
-
-        <div style={styles.row}>
-          <div style={styles.label}>URL</div>
-          <input style={styles.input} value={url} onChange={(e) => setUrl(e.target.value)} />
-        </div>
-
-        <div style={styles.row}>
-          <div style={styles.label}>Published (ISO)</div>
-          <input style={styles.input} value={published} onChange={(e) => setPublished(e.target.value)} />
-        </div>
-
-        <div style={styles.row}>
-          <div style={styles.label}>Impact</div>
-          <input style={styles.input} value={impact} onChange={(e) => setImpact(e.target.value)} />
-        </div>
-
-        <div style={styles.row}>
-          <div style={styles.label}>Category</div>
-          <input style={styles.input} value={category} onChange={(e) => setCategory(e.target.value)} />
-        </div>
-
-        <div style={styles.btnRow}>
-          <button style={styles.btn} onClick={onAdd}>Add news</button>
-          <button style={styles.btnGhost} onClick={clearMessage}>Clear message</button>
-        </div>
-
-        {message?.kind === "ok" && <div style={styles.msgOk}>{message.text}</div>}
-        {message?.kind === "err" && <div style={styles.msgErr}>Error: {message.text}</div>}
-
-        <div style={styles.small}>
-          API_BASE_URL: <span style={styles.code}>{API_BASE_URL || "(relative)"}</span>
-        </div>
-      </div>
-
-      <div style={styles.card}>
-        <div style={{ fontWeight: 700, marginBottom: 10 }}>Filter</div>
-
-        <div style={styles.filterRow}>
-          <input
-            style={styles.input}
-            value={filterInput}
-            onChange={(e) => {
-              setOffset(0);
-              setFilterInput(e.target.value);
-            }}
-            placeholder="np. AAPL, TSLA"
+        {/* ── Sekcja 1: Stats bar ───────────────────────────────────── */}
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          <StatCard label="Spółki w bazie" value={companyCount ?? 0} />
+          <StatCard label="Eventy dziś (24h)" value={eventsTodayCount ?? 0} accent />
+          <StatCard
+            label="Ostatni event"
+            value={formatDate(lastUpdated)}
+            isText
           />
-
-          <select
-            style={styles.input}
-            value={limit}
-            onChange={(e) => {
-              setOffset(0);
-              setLimit(Number(e.target.value));
-            }}
-          >
-            {[10, 25, 50, 100].map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-
-          <input
-            style={styles.input}
-            type="number"
-            value={offset}
-            onChange={(e) => setOffset(Number(e.target.value))}
-          />
-
-          <button style={styles.btnGhost} onClick={load} disabled={loading}>
-            {loading ? "Loading..." : "Reload"}
-          </button>
         </div>
 
-        <div style={styles.small}>
-          Last query: <span style={styles.code}>{lastQuery || "(none)"}</span>
-        </div>
+        {/* ── Sekcja 2 + 3: Main + Sidebar ──────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
 
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Ticker</th>
-              <th style={styles.th}>Title</th>
-              <th style={styles.th}>Source</th>
-              <th style={styles.th}>Published</th>
-              <th style={styles.th}>Impact</th>
-              <th style={styles.th}>Category</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td style={styles.td}><span style={styles.pill}>{r.ticker}</span></td>
-                <td style={styles.td}>
-                  <div style={{ fontWeight: 600 }}>{r.title}</div>
-                  {r.url ? (
-                    <a href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
-                      {r.url}
-                    </a>
-                  ) : null}
-                </td>
-                <td style={styles.td}>{r.source || ""}</td>
-                <td style={styles.td}>{toLocalDateTime(r.published_at)}</td>
-                <td style={styles.td}>{r.impact_score ?? ""}</td>
-                <td style={styles.td}>{r.category ?? ""}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td style={styles.td} colSpan={6}>
-                  {loading ? "Loading..." : "Brak danych"}
-                </td>
-              </tr>
+          {/* Sekcja 2 — Ostatnie eventy */}
+          <div>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+              Ostatnie eventy
+            </h2>
+            <div className="rounded-xl border border-gray-800 overflow-hidden">
+              {!recentEvents?.length ? (
+                <div className="py-16 text-center text-gray-500 text-sm">Brak danych</div>
+              ) : (
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-800 bg-gray-900/60">
+                      <Th>Data</Th>
+                      <Th>Ticker</Th>
+                      <Th className="hidden md:table-cell">Tytuł</Th>
+                      <Th className="hidden sm:table-cell">Typ</Th>
+                      <Th>Score</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(recentEvents as EventRow[]).map((e, i) => (
+                      <tr
+                        key={i}
+                        className="border-b border-gray-800/50 last:border-b-0 hover:bg-gray-900/60 transition-colors"
+                      >
+                        <td className="px-4 py-3 text-xs text-gray-500 tabular-nums whitespace-nowrap">
+                          {formatDate(e.published_at)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Link
+                            href={`/companies/${e.ticker}`}
+                            className="font-mono font-bold text-blue-400 hover:text-blue-300 text-sm transition-colors"
+                          >
+                            {e.ticker}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-300 hidden md:table-cell max-w-xs">
+                          <div className="truncate">{e.title}</div>
+                        </td>
+                        <td className="px-4 py-3 hidden sm:table-cell">
+                          <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400">
+                            {e.event_type ?? "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <ImpactBadge score={e.impact_score} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* Sekcja 3 — Top spółki (sidebar) */}
+          <div>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+              Top spółki (7 dni)
+            </h2>
+            {!topCompanies.length ? (
+              <div className="rounded-xl border border-gray-800 bg-gray-900/40 py-10 text-center text-gray-500 text-sm">
+                Brak danych
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {topCompanies.map((c) => (
+                  <Link
+                    key={c.ticker}
+                    href={`/companies/${c.ticker}`}
+                    className="rounded-xl border border-gray-800 bg-gray-900/40 hover:bg-gray-900/80 transition-colors px-4 py-3 flex items-center justify-between gap-3"
+                  >
+                    <div>
+                      <div className="font-mono font-bold text-white text-sm">{c.ticker}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{c.events} event{c.events !== 1 ? "y" : ""}</div>
+                    </div>
+                    <ImpactBadge score={c.avg_score} />
+                  </Link>
+                ))}
+              </div>
             )}
-          </tbody>
-        </table>
+          </div>
+
+        </div>
       </div>
     </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  accent = false,
+  isText = false,
+}: {
+  label:    string;
+  value:    string | number;
+  accent?:  boolean;
+  isText?:  boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-5 py-4">
+      <div className="text-xs text-gray-500 font-medium mb-1">{label}</div>
+      <div className={`font-bold tabular-nums ${isText ? "text-lg text-gray-200" : "text-3xl"} ${accent ? "text-blue-400" : "text-white"}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function Th({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <th className={`text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 ${className}`}>
+      {children}
+    </th>
   );
 }
