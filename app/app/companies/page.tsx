@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import FavoritesSection from "../components/FavoritesSection";
+import FavoriteButton   from "../components/FavoriteButton";
 
 export const revalidate = 600; // ISR: 10 minutes — company list rarely changes
 
@@ -18,16 +20,20 @@ export default async function CompaniesPage() {
     );
   }
 
-  const gpw = (companies ?? []).filter((c) => c.market === "GPW");
-  const usa = (companies ?? []).filter((c) => c.market === "USA");
+  const all = companies ?? [];
+  const gpw = all.filter((c) => c.market === "GPW");
+  const usa = all.filter((c) => c.market === "USA");
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-5xl mx-auto px-6 py-10">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-white">Spółki</h1>
-          <p className="text-gray-500 mt-1 text-sm">{companies?.length ?? 0} spółek w bazie</p>
+          <p className="text-gray-500 mt-1 text-sm">{all.length} spółek w bazie</p>
         </div>
+
+        {/* Favorites + recently visited (client) */}
+        <FavoritesSection companies={all.map(c => ({ ticker: c.ticker, name: c.name }))} />
 
         <CompanyTable title="GPW" rows={gpw} />
         <CompanyTable title="USA" rows={usa} />
@@ -55,7 +61,7 @@ function CompanyTable({ title, rows }: { title: string; rows: CompanyRow[] }) {
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-800 bg-gray-900/60">
-              <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 w-24">
+              <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 w-28">
                 Ticker
               </th>
               <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">
@@ -67,6 +73,7 @@ function CompanyTable({ title, rows }: { title: string; rows: CompanyRow[] }) {
               <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 w-20">
                 Rynek
               </th>
+              <th className="px-4 py-3 w-10" />
             </tr>
           </thead>
           <tbody>
@@ -93,6 +100,9 @@ function CompanyTable({ title, rows }: { title: string; rows: CompanyRow[] }) {
                   <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">
                     {c.market}
                   </span>
+                </td>
+                <td className="px-4 py-3">
+                  <FavoriteButton ticker={c.ticker} size="sm" />
                 </td>
               </tr>
             ))}

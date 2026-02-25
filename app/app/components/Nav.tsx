@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const links = [
   { href: "/",           label: "Dashboard"     },
@@ -17,9 +17,29 @@ const links = [
   { href: "/status",     label: "Status"        },
 ];
 
+interface NavStats {
+  alerts_count: number;
+  events_today: number;
+}
+
 export default function Nav() {
   const pathname   = usePathname();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen]   = useState(false);
+  const [stats, setStats] = useState<NavStats | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const res  = await fetch("/api/nav-stats");
+        const data = await res.json() as NavStats;
+        if (!cancelled) setStats(data);
+      } catch { /* silent */ }
+    }
+    poll();
+    const id = setInterval(poll, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   return (
     <nav className="bg-gray-900 border-b border-gray-800 sticky top-0 z-40">
@@ -40,17 +60,27 @@ export default function Nav() {
                 ? pathname === "/"
                 : pathname === href || pathname.startsWith(href + "/");
 
+            const badge =
+              href === "/alerts" && stats && stats.alerts_count > 0
+                ? stats.alerts_count
+                : null;
+
             return (
               <Link
                 key={href}
                 href={href}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                className={`relative px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                   isActive
                     ? "bg-gray-700 text-white"
                     : "text-gray-400 hover:text-gray-200 hover:bg-gray-800"
                 }`}
               >
                 {label}
+                {badge !== null && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                    {badge > 99 ? "99+" : badge}
+                  </span>
+                )}
               </Link>
             );
           })}

@@ -2,6 +2,8 @@ import Link         from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 import CompanyTabs   from "@/app/components/CompanyTabs";
+import TrackVisit    from "@/app/components/TrackVisit";
+import FavoriteButton from "@/app/components/FavoriteButton";
 
 export const revalidate = 300; // ISR: re-render every 5 minutes
 
@@ -120,15 +122,19 @@ function CompanyPageLayout({
           <span className="text-gray-300 font-medium">{ticker}</span>
         </nav>
 
+        {/* Track visit (client, no render) */}
+        <TrackVisit ticker={ticker} name={name} />
+
         {/* Header */}
         <div className="mb-8">
-          <div className="flex items-baseline gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-5xl font-bold font-mono text-white tracking-tight">
               {ticker}
             </h1>
             <span className="text-xs px-2.5 py-1 rounded-md bg-gray-800 text-gray-400 font-mono">
               {market}
             </span>
+            <FavoriteButton ticker={ticker} />
           </div>
           <div className="mt-2 text-xl text-gray-300 font-medium">{name}</div>
           {sector && (
