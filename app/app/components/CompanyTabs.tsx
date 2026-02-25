@@ -5,6 +5,7 @@ import PriceChart       from "./PriceChart";
 import FinancialKpis    from "./FinancialKpis";
 import AiChat           from "./AiChat";
 import ConsensusWidget  from "./ConsensusWidget";
+import ForecastWidget   from "./ForecastWidget";
 
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
@@ -157,6 +158,7 @@ export default function CompanyTabs({
         <div className="space-y-8">
           <FinancialKpis ticker={ticker} />
           <ConsensusWidget ticker={ticker} />
+          <ForecastWidget ticker={ticker} />
         </div>
       )}
 
