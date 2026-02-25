@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Nav          from "./components/Nav";
@@ -15,8 +15,21 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Giełda Monitor",
-  description: "Monitor rynku GPW — spółki, eventy, alerty",
+  title:       "Giełda Monitor",
+  description: "Professional stock monitoring for GPW & USA markets",
+  manifest:    "/manifest.json",
+  appleWebApp: {
+    capable:         true,
+    statusBarStyle:  "black-translucent",
+    title:           "Giełda Monitor",
+  },
+};
+
+export const viewport: Viewport = {
+  width:        "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor:   "#111827",
 };
 
 export default function RootLayout({
