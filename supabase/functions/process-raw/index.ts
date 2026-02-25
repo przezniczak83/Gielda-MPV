@@ -1,13 +1,15 @@
 // supabase/functions/process-raw/index.ts
-// Checkpoint 3.3: raw_ingest → company_events pipeline.
+// raw_ingest → company_events pipeline.
 //
 // Dla każdego rekordu raw_ingest gdzie processed_at IS NULL:
-//   1. Ticker w companies?      NIE → skip (mark processed)
-//   2. SHA-256 hash duplicate?  TAK → skip (mark processed)
+//   1. Ticker w companies?               NIE → skip (mark processed)
+//   2. SHA-256 hash duplicate?           TAK → skip (mark processed)
+//   2b. pg_trgm fuzzy title duplicate?   TAK → skip (mark processed)
 //   3. Detect event_type + impact_score from title
 //   4. INSERT company_events
 //   5. UPDATE raw_ingest SET processed_at = now()
 //
+// Wymaga migracji 0007_pgtrgm.sql (pg_trgm + find_fuzzy_duplicate function).
 // Deploy: supabase functions deploy process-raw --project-ref pftgmorsthoezhmojjpg
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -162,6 +164,29 @@ Deno.serve(async (_req: Request): Promise<Response> => {
         await supabase.from("raw_ingest").update({ processed_at: new Date().toISOString() }).eq("id", rec.id);
         skipped++;
         continue;
+      }
+
+      // Step 2b: Level 2 — fuzzy title similarity via pg_trgm
+      // Checks same ticker + same date + similarity(title, new_title) > 0.8
+      if (published_at) {
+        const { data: isFuzzyDup, error: fuzzyErr } = await supabase.rpc(
+          "find_fuzzy_duplicate",
+          {
+            p_ticker:         ticker,
+            p_published_date: published_at.slice(0, 10),
+            p_title:          title,
+          },
+        );
+
+        if (fuzzyErr) {
+          // pg_trgm not available — log and continue without fuzzy check
+          console.warn(`[process-raw] id=${rec.id} fuzzy check error (skipping): ${fuzzyErr.message}`);
+        } else if (isFuzzyDup) {
+          console.log(`[process-raw] id=${rec.id} fuzzy title duplicate (similarity>0.8) → skip`);
+          await supabase.from("raw_ingest").update({ processed_at: new Date().toISOString() }).eq("id", rec.id);
+          skipped++;
+          continue;
+        }
       }
 
       // Step 3: classify
