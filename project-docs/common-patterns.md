@@ -382,6 +382,59 @@ const res = await fetch(`${Deno.env.get("SCRAPER_BASE_URL")}/prices/gpw?ticker=$
 
 ---
 
+## Financial Health Score Pattern (weighted average, 5 components)
+
+```typescript
+// Score components with weights (must sum to 1.0 when normalized)
+const components = [
+  { name: "debt_ebitda",    score: scoreDebtEbitda(ratio),  weight: 0.25 },
+  { name: "fcf_revenue",    score: scoreMarginPct(pct),     weight: 0.25 },
+  { name: "roe",            score: scoreROE(pct),           weight: 0.20 },
+  { name: "revenue_growth", score: scoreGrowth(pct),        weight: 0.15 },
+  { name: "net_margin",     score: scoreMarginPct(pct),     weight: 0.15 },
+].filter(c => c.score > 0);  // skip if data unavailable
+
+// Normalize weights so partial data still gives valid score
+const totalWeight = components.reduce((s, c) => s + c.weight, 0);
+const score = components.reduce((s, c) => s + c.score * (c.weight / totalWeight), 0);
+```
+
+**Scoring functions (higher = better):**
+- `scoreDebtEbitda(x)`: <2x=10, 2-3x=7, 3-5x=4, >5x=1
+- `scoreMarginPct(pct)`: >15%=10, 5-15%=7, 0-5%=4, <0=1
+- `scoreROE(pct)`: >20%=10, 10-20%=7, 5-10%=4, <5%=1
+- `scoreGrowth(pct)`: >20%=10, 5-20%=7, 0-5%=4, <0=1
+
+---
+
+## Red Flags Detection Pattern (10 signals)
+
+```typescript
+// Financial flags from company_financials (last 4 periods)
+const flags: RedFlag[] = [];
+
+// RF01: Revenue decline >10% YoY
+const growthPct = ((latest.revenue - prev.revenue) / Math.abs(prev.revenue)) * 100;
+if (growthPct < -10) flags.push({ code: "RF01", severity: "MEDIUM", ... });
+
+// RF02: Consecutive negative quarters
+const negMargin = rows.filter(r => r.net_income < 0);
+if (negMargin.length >= 2 && rows[0].net_income < 0 && rows[1].net_income < 0)
+  flags.push({ code: "RF02", severity: "HIGH", ... });
+
+// Event keyword flags (last 30 days of company_events)
+const restructureKw = ["restrukturyzacja", "zwolnienia", "odpis"];
+const legalKw       = ["postępowanie", "pozew", "knf", "uokik"];
+const hit = events.find(e => kws.some(k => e.title.toLowerCase().includes(k)));
+```
+
+**Severity mapping:**
+- HIGH: RF01 decline >20%, RF02 persistent losses, RF04 debt>8x, RF06, RF07, RF08 sell>5M
+- MEDIUM: RF03, RF04 debt 5-8x, RF05, RF08 sell>500k, RF10 no data
+- LOW: RF09 low-impact cluster, RF10 stale data
+
+---
+
 ## Stooq CSV Parsing Pattern (Node.js)
 
 Stooq returns Polish-header CSV; use fixed column indices:

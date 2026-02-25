@@ -223,6 +223,47 @@ analysis than GPT-4o Mini. Use as primary, GPT-4o Mini as fallback.
 
 Always implement try/catch → fallback pattern (see common-patterns.md).
 
+### 2026-02-25 — Railway scraper as PRIMARY GPW price source (not just bypass)
+
+**Decision:** Railway scraper is now `source_used: "stooq"` in price_history.
+It uses the `/prices/gpw/history?ticker=X&days=30` endpoint which returns full
+30-day history (ascending), not just the latest row.
+
+**Chain:** Railway/Stooq → EODHD → Twelve Data → Yahoo. GPW tickers confirmed
+source='stooq' after deploy.
+
+---
+
+### 2026-02-25 — company_kpis table: use UPSERT with onConflict on (ticker, kpi_type)
+
+**Pattern:**
+```typescript
+await supabase
+  .from("company_kpis")
+  .upsert({ ticker, kpi_type: "health_score", value: score, metadata, calculated_at },
+           { onConflict: "ticker,kpi_type" });
+```
+The UNIQUE constraint is on `(ticker, kpi_type)`, so each ticker has exactly
+one health_score row and one red_flags row, always overwritten on recalculation.
+
+---
+
+### 2026-02-25 — Parallel Edge Function calls from Next.js API route
+
+**Pattern:** Use `Promise.allSettled` when calling multiple Edge Functions
+from a single Next.js route. Never let one EF failure block the other.
+
+```typescript
+const [healthRes, flagsRes] = await Promise.allSettled([
+  fetch(`${efBase}/analyze-health`, { method: "POST", headers, body }),
+  fetch(`${efBase}/detect-flags`,   { method: "POST", headers, body }),
+]);
+```
+
+**Key:** Pass `SUPABASE_SERVICE_ROLE_KEY` as `Authorization: Bearer` header.
+
+---
+
 ### 2026-02-25 — Stooq ticker format: no `.pl` suffix needed
 
 **Problem:**

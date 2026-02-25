@@ -94,6 +94,31 @@ browser session cookies). Yahoo Finance API works from server environments.
 
 ---
 
+## 2026-02-25 — Financial Health Score & Red Flags as Computed KPIs
+
+**Decision:** Store computed analysis (health score, red flags) in `company_kpis`
+table rather than calculating on every page load.
+
+**Rationale:**
+- Claude Haiku calls take 1-2s each — too slow for page load
+- Historical tracking: can see how scores change over time
+- Decoupled computation: recalculate independently from rendering
+- Single row per (ticker, kpi_type) via UNIQUE constraint + UPSERT
+
+**Schema:**
+```sql
+company_kpis (ticker, kpi_type, value, metadata JSONB, calculated_at)
+UNIQUE(ticker, kpi_type)
+```
+
+**Recalculation:** User clicks "Przelicz" → Next.js `/api/analyze` → calls
+`analyze-health` and `detect-flags` Edge Functions in parallel → upserts results.
+
+**Display:** Scores are read on page load from `company_kpis` (fast DB read).
+Stale data is acceptable — badge shows `calculated_at` timestamp.
+
+---
+
 ## 2026-02-25 — Railway Scraper as IP-Bypass Proxy Layer
 
 **Decision:** Deploy a lightweight Express.js scraper to Railway for data sources
