@@ -115,7 +115,7 @@ async function exportWatchlist(watchlistId: string): Promise<Response> {
 
   const wlName = (wlRes.data?.name ?? "watchlist").replace(/[^a-zA-Z0-9_-]/g, "_");
   const rows   = (itemsRes.data ?? []).map(item => {
-    const c = item.companies as { name: string; sector: string | null; market: string } | null;
+    const c = (item.companies as unknown as { name: string; sector: string | null; market: string }) ?? null;
     return {
       ticker:   item.ticker,
       nazwa:    c?.name ?? "",
