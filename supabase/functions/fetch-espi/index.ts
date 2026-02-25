@@ -1,9 +1,15 @@
 // supabase/functions/fetch-espi/index.ts
-// MVP stub: symuluje fetch ESPI i zapisuje do raw_ingest.
-// Docelowo: zastąp STUB_RECORDS prawdziwym fetchem z espi.gov.pl lub emailem.
+// Real ESPI fetcher with multi-source fallback chain.
 //
-// Deploy: supabase functions deploy fetch-espi --project-ref <ref>
-// Invoke:  supabase functions invoke fetch-espi --project-ref <ref>
+// Source chain:
+//   1. Bankier.pl RSS  — https://www.bankier.pl/rss/espi.xml
+//   2. GPW RSS         — https://www.gpw.pl/komunikaty?type=rss
+//   3. STUB_RECORDS    — fallback so cron never fails silently
+//
+// Ticker matching: extract all-caps 2-6 char words from title,
+// compare against watchlist fetched from Supabase companies table.
+//
+// Deploy: supabase functions deploy fetch-espi --project-ref pftgmorsthoezhmojjpg
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -16,57 +22,199 @@ interface EspiRecord {
   published_at: string | null;
 }
 
-// ─── MVP stub data ────────────────────────────────────────────────────────────
-// Zastąp prawdziwym HTTP fetch gdy gotowy scraper/email parser.
+// ─── Stub fallback ────────────────────────────────────────────────────────────
 
 const STUB_RECORDS: EspiRecord[] = [
   {
     ticker:       "PKN",
-    title:        "ESPI stub: Wyniki Q4 2025 — test rekord",
-    url:          null,
-    published_at: new Date().toISOString(),
-  },
-  {
-    ticker:       "CDR",
-    title:        "ESPI stub: Umowa z dystrybutorem — test rekord",
+    title:        "ESPI stub: fallback — wszystkie źródła RSS niedostępne",
     url:          null,
     published_at: new Date().toISOString(),
   },
 ];
 
+// ─── RSS helpers ──────────────────────────────────────────────────────────────
+
+const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/** Extract text content from a simple XML tag (handles CDATA). */
+function extractTag(xml: string, tag: string): string {
+  const re = new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?<\\/${tag}>`, "s");
+  const m  = re.exec(xml);
+  return m ? m[1].trim() : "";
+}
+
+/** Parse RSS 2.0 XML string into array of raw item strings. */
+function splitItems(xml: string): string[] {
+  const items: string[] = [];
+  let pos = 0;
+  while (true) {
+    const start = xml.indexOf("<item>", pos);
+    if (start === -1) break;
+    const end = xml.indexOf("</item>", start);
+    if (end === -1) break;
+    items.push(xml.slice(start, end + 7));
+    pos = end + 7;
+  }
+  return items;
+}
+
+/** Try to extract ticker from title/description against known watchlist. */
+function extractTicker(
+  title:       string,
+  description: string,
+  tickers:     Set<string>,
+): string | null {
+  // Company name is before the first ":"
+  const companyPart = title.split(":")[0].toUpperCase();
+
+  // Extract all-caps words of 2–6 chars
+  const words = companyPart.match(/\b[A-Z0-9]{2,6}\b/g) ?? [];
+  for (const w of words) {
+    if (tickers.has(w)) return w;
+  }
+
+  // Secondary: PDF filename prefix in description: "TICKER_filename.pdf"
+  const pdfMatch = description.match(/\b([A-Z0-9]{2,6})_[A-Z0-9]/);
+  if (pdfMatch && tickers.has(pdfMatch[1])) return pdfMatch[1];
+
+  return null;
+}
+
+/** Parse RSS pubDate to ISO string. */
+function parsePubDate(raw: string): string | null {
+  try {
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+interface FetchResult {
+  records:      EspiRecord[];
+  totalItems:   number;
+  watchlistHit: number;
+}
+
+/** Fetch ESPI records from a single RSS URL.
+ *  Inserts ALL real records; ticker is best-effort from watchlist matching. */
+async function fetchRSS(url: string, tickers: Set<string>): Promise<FetchResult> {
+  const res = await fetch(url, {
+    headers: { "User-Agent": BROWSER_UA, "Accept": "application/rss+xml, application/xml, text/xml" },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const xml   = await res.text();
+  const items = splitItems(xml);
+  if (items.length === 0) throw new Error("RSS returned 0 items");
+
+  const records: EspiRecord[] = [];
+  let watchlistHit = 0;
+
+  for (const item of items) {
+    const rawTitle = extractTag(item, "title");
+    const link     = extractTag(item, "link");
+    const pubDate  = extractTag(item, "pubDate");
+    const desc     = extractTag(item, "description");
+
+    if (!rawTitle) continue;
+
+    // Try to match watchlist ticker; fall back to company name abbreviation
+    const watchlistTicker = extractTicker(rawTitle, desc, tickers);
+    if (watchlistTicker) watchlistHit++;
+
+    // Extract company name (before ":") as best-effort ticker if no watchlist match
+    const companyRaw = rawTitle.split(":")[0].trim();
+    // Take first uppercase word of 2–6 chars as ticker candidate
+    const candidateMatch = companyRaw.toUpperCase().match(/\b[A-Z0-9]{2,6}\b/);
+    const tickerFinal    = watchlistTicker ?? (candidateMatch?.[0] || companyRaw.slice(0, 6));
+
+    records.push({
+      ticker:       tickerFinal,
+      title:        rawTitle.split(":").slice(1).join(":").trim() || rawTitle,
+      url:          link || null,
+      published_at: parsePubDate(pubDate),
+    });
+  }
+
+  return { records, totalItems: items.length, watchlistHit };
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (_req: Request): Promise<Response> => {
-  // MVP: Simplified auth - rely on service_role JWT from cron call
-  // Security sufficient for internal Edge Function (not publicly exposed)
-  console.log("[fetch-espi] Function invoked at:", new Date().toISOString());
+  console.log("[fetch-espi] Invoked at:", new Date().toISOString());
 
-  // Klient Supabase z service_role — zapis do raw_ingest
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")              ?? "";
   const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
   if (!supabaseUrl || !serviceKey) {
-    console.error("[fetch-espi] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
     return new Response(
       JSON.stringify({ ok: false, error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
 
-  const supabase = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false },
-  });
+  const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-  // Fetch danych (stub — zastąp prawdziwym HTTP fetch)
-  const records = STUB_RECORDS;
+  // ── Load watchlist tickers ─────────────────────────────────────────────────
+  const { data: companies, error: compErr } = await supabase
+    .from("companies")
+    .select("ticker");
 
-  // Zapis do raw_ingest
+  if (compErr) {
+    console.warn("[fetch-espi] Could not load companies:", compErr.message);
+  }
+
+  const knownTickers = new Set<string>(
+    (companies ?? []).map((c: { ticker: string }) => c.ticker.toUpperCase()),
+  );
+  console.log(`[fetch-espi] Watchlist: ${knownTickers.size} tickers`);
+
+  // ── Fetch real data from RSS sources ──────────────────────────────────────
+  const RSS_SOURCES = [
+    { name: "bankier",  url: "https://www.bankier.pl/rss/espi.xml" },
+    { name: "gpw",      url: "https://www.gpw.pl/komunikaty?type=rss" },
+  ];
+
+  let records: EspiRecord[] = [];
+  let sourceUsed   = "stub";
+  let watchlistHit = 0;
+  let totalItems   = 0;
+
+  for (const src of RSS_SOURCES) {
+    try {
+      const result = await fetchRSS(src.url, knownTickers);
+      if (result.records.length > 0) {
+        records      = result.records;
+        watchlistHit = result.watchlistHit;
+        totalItems   = result.totalItems;
+        sourceUsed   = src.name;
+        console.log(`[fetch-espi] ${src.name}: ${result.totalItems} total, ${result.watchlistHit} watchlist hits → inserting ${result.records.length}`);
+        break;
+      }
+      console.log(`[fetch-espi] ${src.name}: returned 0 items, trying next`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[fetch-espi] ${src.name} failed: ${msg}`);
+    }
+  }
+
+  // Fallback to stubs if all RSS sources fail
+  if (records.length === 0) {
+    console.warn("[fetch-espi] All RSS sources failed — using stub fallback");
+    records    = STUB_RECORDS;
+    sourceUsed = "stub";
+  }
+
+  // ── Insert into raw_ingest ────────────────────────────────────────────────
   const rows = records.map(r => ({
     source:  "espi",
     payload: r as unknown as Record<string, unknown>,
   }));
 
-  console.log(`[fetch-espi] Processing ${records.length} stub records`);
+  console.log(`[fetch-espi] Inserting ${rows.length} records (source=${sourceUsed})`);
 
   const { data, error } = await supabase
     .from("raw_ingest")
@@ -82,10 +230,18 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   }
 
   const inserted = data?.length ?? 0;
-  console.log(`[fetch-espi] Successfully inserted ${inserted} records`);
+  console.log(`[fetch-espi] Inserted ${inserted} records ✓`);
 
   return new Response(
-    JSON.stringify({ ok: true, inserted, source: "espi", ts: new Date().toISOString() }),
+    JSON.stringify({
+      ok:            true,
+      inserted,
+      source:        sourceUsed,
+      total_rss:     totalItems,
+      watchlist_hit: watchlistHit,
+      tickers:       records.map(r => r.ticker),
+      ts:            new Date().toISOString(),
+    }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
 });
