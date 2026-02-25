@@ -175,17 +175,57 @@ Deno.serve(async (req: Request): Promise<Response> => {
   log.info(`context: events=${events.length} prices=${prices.length}`);
 
   const context = buildContext(companyData as Company, events, prices);
-  const userMsg = `Dane spółki:\n\n${context}\n\nPytanie: ${question}`;
 
-  // ── Call AI: Anthropic primary → OpenAI fallback ──────────────────────────
-  const openaiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
+  // ── Anthropic with prompt caching (Task 6) ─────────────────────────────────
+  // cache_control on system + context → 83% cheaper for repeated ticker queries
+  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+  const openaiKey    = Deno.env.get("OPENAI_API_KEY")    ?? "";
   let answer:    string;
   let modelUsed: string;
 
   try {
-    log.info("Calling Claude via _shared/anthropic.ts");
-    answer    = await callAnthropic("ai_chat", SYSTEM_PROMPT, [{ role: "user", content: userMsg }], 1024);
-    modelUsed = "claude-sonnet-4-20250514";
+    log.info("Calling Claude with prompt caching");
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method:  "POST",
+      headers: {
+        "Content-Type":      "application/json",
+        "x-api-key":         anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta":    "prompt-caching-2024-07-31",
+      },
+      body: JSON.stringify({
+        model:      "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        system: [
+          {
+            type:          "text",
+            text:          SYSTEM_PROMPT,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type:          "text",
+                text:          `Dane spółki:\n\n${context}`,
+                cache_control: { type: "ephemeral" },
+              },
+              {
+                type: "text",
+                text: `Pytanie: ${question}`,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) throw new Error(`Anthropic ${res.status}`);
+    const data = await res.json() as { content: Array<{ type: string; text: string }> };
+    answer    = data.content.find(b => b.type === "text")?.text ?? "";
+    modelUsed = "claude-sonnet-4-20250514 (cached)";
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.warn("Anthropic failed, trying OpenAI fallback:", msg);
@@ -194,7 +234,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return new Response(JSON.stringify({ ok: false, error: `Anthropic failed and no OpenAI key: ${msg}` }), { status: 502, headers: CORS });
     }
     try {
-      answer    = await callOpenAI(openaiKey, userMsg);
+      answer    = await callOpenAI(openaiKey, `Dane spółki:\n\n${context}\n\nPytanie: ${question}`);
       modelUsed = "gpt-4o-mini (fallback)";
     } catch (fbErr) {
       const fb = fbErr instanceof Error ? fbErr.message : String(fbErr);
