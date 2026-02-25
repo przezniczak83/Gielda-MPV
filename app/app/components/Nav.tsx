@@ -8,6 +8,7 @@ const links = [
   { href: "/companies",   label: "Spółki"         },
   { href: "/watchlists",  label: "Watchlisty"     },
   { href: "/portfolio",   label: "Portfel"        },
+  { href: "/calendar",    label: "Kalendarz"      },
   { href: "/alerts",      label: "Alerty"         },
   { href: "/upload",      label: "Wgraj raport"   },
   { href: "/api/health",  label: "Status systemu" },
