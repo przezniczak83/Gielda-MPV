@@ -42,7 +42,6 @@ export async function GET() {
     rawIngestRes,
     priceHistoryRes,
     forecastsRes,
-    portfolioRes,
     lastIngestRes,
     lastPriceRes,
     lastAlertRes,
@@ -54,7 +53,6 @@ export async function GET() {
     supabase.from("raw_ingest").select("*",         { count: "exact", head: true }),
     supabase.from("price_history").select("*",      { count: "exact", head: true }),
     supabase.from("analyst_forecasts").select("*",  { count: "exact", head: true }),
-    supabase.from("portfolio_positions").select("*",{ count: "exact", head: true }),
     supabase.from("raw_ingest")
       .select("inserted_at").order("inserted_at", { ascending: false }).limit(1),
     supabase.from("price_history")
@@ -95,7 +93,6 @@ export async function GET() {
       raw_ingest:         count(rawIngestRes),
       price_history:      count(priceHistoryRes),
       analyst_forecasts:  count(forecastsRes),
-      portfolio_positions:count(portfolioRes),
       calendar_events:    count(calendarRes),
       company_kpis:       count(kpisRes),
     },

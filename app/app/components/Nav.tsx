@@ -10,7 +10,6 @@ const links = [
   { href: "/screener",   label: "Screener"      },
   { href: "/macro",      label: "Makro"         },
   { href: "/watchlists", label: "Watchlisty"    },
-  { href: "/portfolio",  label: "Portfel"       },
   { href: "/calendar",   label: "Kalendarz"     },
   { href: "/alerts",     label: "Alerty"        },
   { href: "/upload",     label: "Wgraj raport"  },

@@ -12,7 +12,7 @@ interface HealthData {
     raw_ingest:          number;
     price_history:       number;
     analyst_forecasts:   number;
-    portfolio_positions: number;
+
     calendar_events:     number;
     company_kpis:        number;
   };
@@ -59,7 +59,7 @@ const STAT_LABELS: Array<{ key: keyof HealthData["stats"]; label: string }> = [
   { key: "raw_ingest",          label: "Raw Ingest"         },
   { key: "price_history",       label: "Price History"      },
   { key: "analyst_forecasts",   label: "Analyst Forecasts"  },
-  { key: "portfolio_positions", label: "Portfolio Positions"},
+
   { key: "calendar_events",     label: "Calendar Events"    },
   { key: "company_kpis",        label: "Company KPIs"       },
 ];

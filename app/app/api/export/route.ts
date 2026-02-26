@@ -5,7 +5,6 @@
 // GET /api/export?type=prices&ticker=PKN
 // GET /api/export?type=financials&ticker=PKN
 // GET /api/export?type=watchlist&id=<watchlist_id>
-// GET /api/export?type=portfolio  (all portfolio positions)
 
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -128,32 +127,6 @@ async function exportWatchlist(watchlistId: string): Promise<Response> {
   return csvResponse(toCSV(rows), `${wlName}.csv`);
 }
 
-async function exportPortfolio(): Promise<Response> {
-  const db = supabase();
-  const { data, error } = await db
-    .from("portfolio_positions")
-    .select("ticker, quantity, avg_buy_price, currency, companies(name)")
-    .order("ticker");
-
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-
-  const rows = (data ?? []).map(pos => {
-    const c = (pos.companies as unknown as { name: string }) ?? null;
-    const qty  = Number(pos.quantity)      || 0;
-    const avg  = Number(pos.avg_buy_price) || 0;
-    return {
-      ticker:       pos.ticker,
-      nazwa:        c?.name ?? "",
-      ilosc:        qty,
-      srednia_cena: avg,
-      waluta:       pos.currency ?? "PLN",
-      wartosc:      (qty * avg).toFixed(2),
-    };
-  });
-
-  return csvResponse(toCSV(rows), "portfolio.csv");
-}
-
 // ─── GET handler ──────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -179,12 +152,9 @@ export async function GET(req: NextRequest) {
       if (!id) return Response.json({ error: "id required" }, { status: 400 });
       return exportWatchlist(id);
 
-    case "portfolio":
-      return exportPortfolio();
-
     default:
       return Response.json(
-        { error: "type must be: events | prices | financials | watchlist | portfolio" },
+        { error: "type must be: events | prices | financials | watchlist" },
         { status: 400 },
       );
   }

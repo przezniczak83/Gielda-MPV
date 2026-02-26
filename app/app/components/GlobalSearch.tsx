@@ -60,11 +60,10 @@ export default function GlobalSearch() {
   // Debounced search
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Command shortcuts (/m /w /p /s) ────────────────────────────────────
+  // ── Command shortcuts (/m /w /s) ────────────────────────────────────────
   const COMMANDS: Record<string, { label: string; href: string }> = {
     "/m":  { label: "Makro wskaźniki",   href: "/macro"      },
     "/w":  { label: "Watchlisty",        href: "/watchlists" },
-    "/p":  { label: "Portfel",           href: "/portfolio"  },
     "/s":  { label: "Screener spółek",   href: "/screener"   },
   };
 
@@ -260,7 +259,6 @@ export default function GlobalSearch() {
                 <span><span className="text-gray-500">PKN</span> → spółka</span>
                 <span><span className="text-gray-500">/m</span> → makro</span>
                 <span><span className="text-gray-500">/w</span> → watchlisty</span>
-                <span><span className="text-gray-500">/p</span> → portfel</span>
                 <span><span className="text-gray-500">/s</span> → screener</span>
               </div>
             </div>
