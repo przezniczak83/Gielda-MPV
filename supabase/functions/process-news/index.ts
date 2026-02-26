@@ -1,10 +1,18 @@
 // supabase/functions/process-news/index.ts
-// AI analysis pipeline for news_items — v4.
+// AI analysis pipeline for news_items — v5.
 //
-// Changes from v3:
-//   - ZMIANA A: Validate AI-returned tickers against companies table
-//   - ZMIANA B: Stricter GPT-4o-mini system prompt (no false positives)
-//   - ZMIANA C: Heuristic requires min 4-char aliases + confidence scoring
+// Changes from v4:
+//   - ZMIANA D: Two-stage ticker matching with confidence scores
+//       Heuristic assigns 0.6–0.8 based on alias length + title boost
+//       AI returns ticker_confidence map (0.0–1.0)
+//       ESPI source: always confidence = 1.0
+//       Only tickers with confidence >= 0.7 saved to tickers[]
+//   - ZMIANA E: event_group_id — group articles about the same event
+//       Post-save: find similar articles (same tickers, ±2h window)
+//       Assign shared event_group_id across the group
+//   - ZMIANA F: Stricter AI prompt with explicit confidence requirement
+//       AI must return ticker_confidence alongside tickers
+//       Max 3 tickers, only those the AI is confident about
 //
 // Model: GPT-4o-mini (OPENAI_API_KEY)
 // Batch: 100 items/run (trigger mode: 10), CONCURRENCY=5
@@ -32,16 +40,17 @@ interface KeyFact {
 }
 
 interface AIAnalysis {
-  tickers:           string[];
-  sector:            string | null;
-  sentiment:         number;
-  impact_score:      number;
-  category:          string;
-  ai_summary:        string;
-  key_facts:         KeyFact[];
-  topics:            string[];
-  is_breaking:       boolean;
-  impact_assessment: string;
+  tickers:            string[];
+  ticker_confidence:  Record<string, number>;
+  sector:             string | null;
+  sentiment:          number;
+  impact_score:       number;
+  category:           string;
+  ai_summary:         string;
+  key_facts:          KeyFact[];
+  topics:             string[];
+  is_breaking:        boolean;
+  impact_assessment:  string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -50,6 +59,14 @@ const BATCH_SIZE    = 100;  // cron batch
 const TRIGGER_BATCH = 10;   // trigger (fast path)
 const CONCURRENCY   = 5;    // parallel OpenAI calls per chunk
 const SLEEP_BETWEEN = 200;  // ms between chunks (safe for GPT-4o-mini 500 RPM)
+
+// Confidence thresholds
+const HEUR_CONF_TITLE_BOOST = 0.1;  // added when alias found in title (vs body only)
+const HEUR_CONF_LONG   = 0.8;       // alias >= 8 chars
+const HEUR_CONF_MEDIUM = 0.7;       // alias 6-7 chars
+const HEUR_CONF_SHORT  = 0.6;       // alias 4-5 chars
+const DISPLAY_THRESHOLD = 0.7;      // only tickers above this go to tickers[]
+const ESPI_CONFIDENCE   = 1.0;      // official documents
 
 // Sources with paywalled content — skip AI if summary is too short
 const PAYWALL_SOURCES = ["rp", "parkiet", "pb"];
@@ -60,73 +77,102 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ─── ZMIANA C: Heuristic with min-4-char + confidence ────────────────────────
+// ─── ZMIANA D: Heuristic with per-ticker confidence ───────────────────────────
 
 function extractTickersHeuristic(
   title:        string,
   body:         string | null,
   aliasMap:     Map<string, string>,
   validTickers: Set<string>,
-): string[] {
-  const text  = (title + " " + (body ?? "")).toLowerCase();
-  const found = new Set<string>();
+): Map<string, number> {
+  const fullText  = (title + " " + (body ?? "")).toLowerCase();
+  const titleText = title.toLowerCase();
+  const found     = new Map<string, number>();  // ticker → confidence
 
   // Sort aliases by length descending (longest / most specific first)
   const sorted = [...aliasMap.entries()]
-    .filter(([alias]) => alias.length >= 4)          // min 4 chars — no noise
+    .filter(([alias]) => alias.length >= 4)    // min 4 chars — no noise
     .sort((a, b) => b[0].length - a[0].length);
 
   for (const [alias, ticker] of sorted) {
-    if (!validTickers.has(ticker)) continue;          // only known companies
+    if (!validTickers.has(ticker)) continue;
+    if (found.has(ticker)) continue;           // already found with higher confidence
 
     // Strict word-boundary check
     const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const re      = new RegExp(`(?:^|[\\s,\\.\\(\\[\"'])${escaped}(?:$|[\\s,\\.\\)\\]\"'])`, "i");
-    if (re.test(text)) {
-      found.add(ticker);
-      if (found.size >= 3) break;  // max 3 from heuristic
-    }
+
+    if (!re.test(fullText)) continue;
+
+    // Base confidence by alias length
+    let conf =
+      alias.length >= 8 ? HEUR_CONF_LONG :
+      alias.length >= 6 ? HEUR_CONF_MEDIUM :
+                          HEUR_CONF_SHORT;
+
+    // Boost if found in title specifically
+    if (re.test(titleText)) conf = Math.min(conf + HEUR_CONF_TITLE_BOOST, 0.95);
+
+    found.set(ticker, conf);
+    if (found.size >= 3) break;  // max 3 from heuristic
   }
 
-  return [...found];
+  return found;
 }
 
-// ─── ZMIANA B: Stricter AI Analysis ──────────────────────────────────────────
+// ─── ZMIANA F: Stricter AI Analysis with confidence ───────────────────────────
 
 async function analyzeItem(
   item:         NewsItem,
-  preExtracted: string[],
+  heuristic:    Map<string, number>,
   allTickers:   string[],
   openaiKey:    string,
 ): Promise<AIAnalysis | null> {
-  const tickerContext = preExtracted.length > 0
-    ? `\nMożliwe spółki (zweryfikuj czy są GŁÓWNYM tematem): ${preExtracted.join(", ")}`
+  const heurContext = heuristic.size > 0
+    ? `\nHeurystyka znalazła: ${[...heuristic.entries()].map(([t, c]) => `${t}(${c.toFixed(1)})`).join(", ")} — zweryfikuj czy są GŁÓWNYM tematem`
     : "";
 
   const systemPrompt =
     `Jesteś ekspertem analizy finansowej GPW i giełd światowych.
 Analizujesz polskie wiadomości finansowe i zwracasz WYŁĄCZNIE JSON bez markdown.
 
-KRYTYCZNE ZASADY dla pola "tickers":
-1. Zwróć ticker TYLKO jeśli spółka jest GŁÓWNYM TEMATEM artykułu
-2. NIE zwracaj tickera jeśli spółka jest tylko wspomniana przy okazji
-3. NIE zwracaj: walut (EUR, USD, PLN), indeksów (WIG20, SP500), instytucji (NBP, MSZ, KNF)
-4. Używaj WYŁĄCZNIE oficjalnych tickerów GPW (bez .WA) lub US
-5. Maksymalnie 3 tickers — jeśli nie jesteś pewien, zwróć []
-6. Dla ESPI/komunikatów regulacyjnych: ticker to spółka która wysłała raport
+KRYTYCZNE ZASADY dla pola "tickers" i "ticker_confidence":
+
+Dodaj ticker WYŁĄCZNIE gdy spełniony jest JEDEN z warunków:
+A) Nazwa spółki lub ticker są DOSŁOWNIE w tytule lub treści artykułu
+B) Artykuł to oficjalny komunikat tej spółki (ESPI/raport regulacyjny)
+C) Artykuł jest WYŁĄCZNIE o tej spółce (nie o sektorze/rynku)
+
+NIE dodawaj tickera gdy:
+- Spółka "mogłaby być dotknięta" tematem (np. stopy NBP → PKO, MBK)
+- Artykuł dotyczy całego sektora (energetyka → PKN, PGE; banki → MBK, PKO)
+- Spółka jest wspomniana jako przykład lub w kontekście ogólnym
+- Artykuł jest makroekonomiczny (stopy, inflacja, kurs walut, indeksy)
+- "ten", "art", "dom", "sim", "sat", "bio", "san" to pospolite słowa, nie tickery
+
+Dla KAŻDEGO znalezionego tickera podaj confidence 0.0–1.0:
+1.0 = spółka wprost wymieniona z nazwy i ticker w tytule
+0.9 = nazwa spółki wprost w tytule
+0.8 = nazwa spółki wprost w treści (nie tytule)
+0.7 = ticker/alias dosłownie w treści
+0.4 = AI uzało za sektorowo relevantne (ten próg jest za niski — nie używaj)
+
+Zwróć TYLKO tickers z confidence >= 0.7 w tablicy "tickers".
+Maksymalnie 3 tickers per artykuł. Jeśli nie masz pewności — zwróć [].
 
 Przykłady POPRAWNE:
-- "mBank ogłasza wyniki Q4" → ["MBK"]
-- "PKN Orlen podpisał kontrakt z PGNiG" → ["PKN", "PGN"]
-- Komunikat ESPI od Text SA → ["TXT"]
+- "mBank ogłasza wyniki Q4" → tickers: ["MBK"], confidence: {"MBK": 0.95}
+- "PKN Orlen podpisał kontrakt z PGNiG" → tickers: ["PKN","PGN"], confidence: {"PKN": 0.9, "PGN": 0.8}
+- Komunikat ESPI od Text SA → tickers: ["TXT"], confidence: {"TXT": 1.0}
 
 Przykłady BŁĘDNE (nie rób tego):
-- Artykuł o stopach NBP → [] (nie: ["PKO","MBK"] — to nie jest o bankach)
-- "Tekst przemówienia ministra" → [] (nie: ["TXT"] — "tekst" to pospolite słowo)
-- Artykuł ogólnofinansowy → [] (max 3 tickery, tylko główne podmioty)`;
+- Artykuł o stopach NBP → [] (nie: ["PKO","MBK"] — stopy to nie wyniki banków)
+- "Tekst przemówienia ministra" → [] (nie: ["TXT"] — "tekst" to słowo, nie spółka)
+- "Rynek energetyczny w Polsce" → [] (nie: ["PKN","PGE","TPE"])
+- Artykuł o kursie EUR/PLN → [] (nie: ["EUR","PLN"])`;
 
   const userPrompt =
-    `ZNANE TICKERY GPW: ${allTickers.slice(0, 200).join(", ")}${tickerContext}
+    `ZNANE TICKERY GPW: ${allTickers.slice(0, 200).join(", ")}${heurContext}
 ŹRÓDŁO: ${item.source}
 TYTUŁ: ${item.title}
 TREŚĆ: ${(item.summary ?? "").slice(0, 2000)}
@@ -134,6 +180,7 @@ TREŚĆ: ${(item.summary ?? "").slice(0, 2000)}
 Zwróć JSON:
 {
   "tickers": [],
+  "ticker_confidence": {},
   "sector": "finanse|energetyka|technologia|chemia|handel|nieruchomosci|przemysl|inne",
   "sentiment": 0.0,
   "impact_score": 5,
@@ -157,7 +204,7 @@ Zwróć JSON:
         { role: "system", content: systemPrompt },
         { role: "user",   content: userPrompt },
       ],
-      max_tokens:      500,
+      max_tokens:      600,
       temperature:     0.1,
       response_format: { type: "json_object" },
     }),
@@ -182,6 +229,17 @@ Zwróć JSON:
     throw new Error(`JSON parse failed: ${raw.slice(0, 100)}`);
   }
 
+  // Sanitize ticker_confidence
+  const rawConf = (typeof parsed.ticker_confidence === "object" && parsed.ticker_confidence !== null)
+    ? parsed.ticker_confidence as Record<string, unknown>
+    : {};
+  const ticker_confidence: Record<string, number> = {};
+  for (const [k, v] of Object.entries(rawConf)) {
+    if (typeof v === "number") {
+      ticker_confidence[k] = Math.max(0, Math.min(1, v));
+    }
+  }
+
   // Sanitize key_facts
   const rawFacts = Array.isArray(parsed.key_facts) ? parsed.key_facts : [];
   const key_facts: KeyFact[] = rawFacts.slice(0, 10).map((f: Record<string, unknown>) => ({
@@ -193,20 +251,58 @@ Zwróć JSON:
       : "neutral",
   })).filter(f => f.description.length > 0);
 
+  // AI-returned tickers — only those with confidence >= threshold in the confidence map
+  const rawTickers = Array.isArray(parsed.tickers) ? (parsed.tickers as string[]).slice(0, 10) : [];
+
   return {
-    tickers:      Array.isArray(parsed.tickers) ? (parsed.tickers as string[]).slice(0, 10) : [],
-    sector:       typeof parsed.sector           === "string" ? parsed.sector : null,
-    sentiment:    typeof parsed.sentiment        === "number"
+    tickers:     rawTickers,
+    ticker_confidence,
+    sector:      typeof parsed.sector           === "string" ? parsed.sector : null,
+    sentiment:   typeof parsed.sentiment        === "number"
       ? Math.max(-1, Math.min(1, parsed.sentiment)) : 0,
-    impact_score: typeof parsed.impact_score     === "number"
+    impact_score: typeof parsed.impact_score    === "number"
       ? Math.max(1, Math.min(10, Math.round(parsed.impact_score as number))) : 5,
-    category:         typeof parsed.category          === "string" ? parsed.category         : "other",
-    ai_summary:       typeof parsed.ai_summary         === "string" ? parsed.ai_summary.slice(0, 500) : "",
-    impact_assessment:typeof parsed.impact_assessment  === "string" ? parsed.impact_assessment : "neutral",
-    is_breaking:      parsed.is_breaking === true,
+    category:          typeof parsed.category          === "string" ? parsed.category         : "other",
+    ai_summary:        typeof parsed.ai_summary         === "string" ? parsed.ai_summary.slice(0, 500) : "",
+    impact_assessment: typeof parsed.impact_assessment  === "string" ? parsed.impact_assessment : "neutral",
+    is_breaking:       parsed.is_breaking === true,
     key_facts,
     topics: Array.isArray(parsed.topics) ? (parsed.topics as string[]).slice(0, 10) : [],
   };
+}
+
+// ─── ZMIANA E: Assign event_group_id ─────────────────────────────────────────
+
+async function assignEventGroup(
+  itemId:      number,
+  tickers:     string[],
+  publishedAt: string | null,
+  supabase:    SupabaseClient,
+): Promise<void> {
+  if (tickers.length === 0) return;
+
+  const pubTime    = publishedAt ?? new Date().toISOString();
+  const windowMs   = 2 * 60 * 60 * 1000;
+  const windowStart = new Date(new Date(pubTime).getTime() - windowMs).toISOString();
+  const windowEnd   = new Date(new Date(pubTime).getTime() + windowMs).toISOString();
+
+  // Find similar articles: same tickers ∩ within ±2h window
+  const { data: similar } = await supabase
+    .from("news_items")
+    .select("id, event_group_id")
+    .contains("tickers", tickers)
+    .gte("published_at", windowStart)
+    .lte("published_at", windowEnd)
+    .neq("id", itemId)
+    .limit(3);
+
+  const existingGroupId = (similar ?? []).find(s => s.event_group_id != null)?.event_group_id ?? null;
+  const groupId = existingGroupId ?? crypto.randomUUID();
+
+  await supabase
+    .from("news_items")
+    .update({ event_group_id: groupId })
+    .eq("id", itemId);
 }
 
 // ─── Process a single item ────────────────────────────────────────────────────
@@ -225,18 +321,26 @@ async function processItem(
   allTickers:   string[],
   openaiKey:    string,
 ): Promise<ProcessResult> {
-  // ZMIANA C: heuristic with min-4-char + valid tickers only
-  const preExtracted = extractTickersHeuristic(item.title, item.summary, aliasMap, validTickers);
+  // ZMIANA D: Heuristic with per-ticker confidence
+  const heuristicMap = extractTickersHeuristic(item.title, item.summary, aliasMap, validTickers);
+
+  // ZMIANA D: ESPI source → confidence 1.0 for all pre-extracted tickers
+  const isEspi = item.source === "espi";
 
   // Paywall filter — skip AI for paywalled sources with no body content
   if (PAYWALL_SOURCES.includes(item.source) && (!item.summary || item.summary.length < 100)) {
+    const heurTickers = [...heuristicMap.keys()];
+    const paywallConf: Record<string, number> = {};
+    for (const [t, c] of heuristicMap) paywallConf[t] = c;
+
     const paywallUpdate: Record<string, unknown> = {
-      ai_processed: true,
-      impact_score: 3,
-      category:     "other",
-      ai_summary:   item.title.slice(0, 300),
+      ai_processed:      true,
+      impact_score:      3,
+      category:          "other",
+      ai_summary:        item.title.slice(0, 300),
+      ticker_confidence: paywallConf,
     };
-    if (preExtracted.length > 0) paywallUpdate.tickers = preExtracted;
+    if (heurTickers.length > 0) paywallUpdate.tickers = heurTickers;
     await supabase.from("news_items").update(paywallUpdate).eq("id", item.id);
     console.log(`[process-news] item ${item.id}: paywall skip (${item.source})`);
     return { ok: true, id: item.id };
@@ -244,20 +348,58 @@ async function processItem(
 
   let analysis: AIAnalysis | null = null;
   try {
-    analysis = await analyzeItem(item, preExtracted, allTickers, openaiKey);
+    analysis = await analyzeItem(item, heuristicMap, allTickers, openaiKey);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[process-news] item ${item.id} AI error: ${msg}`);
   }
 
-  // ZMIANA A: Validate AI-returned tickers — only keep tickers in companies table
-  const aiTickers = (analysis?.tickers ?? []).filter(t => validTickers.has(t));
+  // ── ZMIANA D: Merge heuristic + AI confidence ─────────────────────────────
 
-  // Merge: AI validated + heuristic (heuristic already validated)
-  const finalTickers = [...new Set([...aiTickers, ...preExtracted])].slice(0, 5);
+  // Start with heuristic confidences
+  const mergedConf: Record<string, number> = {};
+  for (const [t, c] of heuristicMap) {
+    if (validTickers.has(t)) mergedConf[t] = c;
+  }
 
-  // Update news_items (always mark processed to prevent infinite retry)
-  const update: Record<string, unknown> = { ai_processed: true };
+  // Merge AI confidences — take max of heuristic and AI
+  if (analysis) {
+    // AI-validated tickers (from returned tickers array + confidence map)
+    const aiConf = analysis.ticker_confidence;
+    const aiTickers = analysis.tickers.filter(t => validTickers.has(t));
+
+    for (const t of aiTickers) {
+      const aiC = aiConf[t] ?? 0.75;  // default if AI returned ticker but no conf
+      mergedConf[t] = Math.max(mergedConf[t] ?? 0, aiC);
+    }
+
+    // Also consider confidence map entries even if not in tickers[]
+    for (const [t, c] of Object.entries(aiConf)) {
+      if (validTickers.has(t) && c >= DISPLAY_THRESHOLD) {
+        mergedConf[t] = Math.max(mergedConf[t] ?? 0, c);
+      }
+    }
+  }
+
+  // ESPI override — official documents always confidence 1.0
+  if (isEspi) {
+    for (const t of Object.keys(mergedConf)) {
+      mergedConf[t] = ESPI_CONFIDENCE;
+    }
+  }
+
+  // Only save tickers with confidence >= display threshold
+  const finalTickers = Object.entries(mergedConf)
+    .filter(([, c]) => c >= DISPLAY_THRESHOLD)
+    .sort((a, b) => b[1] - a[1])  // highest confidence first
+    .slice(0, 5)
+    .map(([t]) => t);
+
+  // Update news_items
+  const update: Record<string, unknown> = {
+    ai_processed:      true,
+    ticker_confidence: mergedConf,
+  };
   if (analysis) {
     update.tickers           = finalTickers;
     update.sector            = analysis.sector;
@@ -295,11 +437,22 @@ async function processItem(
     }
   }
 
+  // ZMIANA E: Assign event_group_id (best-effort, don't fail the item)
+  if (finalTickers.length > 0) {
+    try {
+      await assignEventGroup(item.id, finalTickers, item.published_at, supabase);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[process-news] item ${item.id} group assignment failed: ${msg}`);
+    }
+  }
+
   if (analysis) {
-    const aiCount  = aiTickers.length;
-    const allCount = finalTickers.length;
+    const totalConf = Object.entries(mergedConf)
+      .map(([t, c]) => `${t}:${c.toFixed(1)}`)
+      .join(",");
     const breaking = analysis.is_breaking ? " 🚨BREAKING" : "";
-    console.log(`[process-news] item ${item.id}: impact=${analysis.impact_score} tickers=${finalTickers.join(",") || "none"} (ai:${aiCount} heur:${preExtracted.length}→${allCount})${breaking} ✓`);
+    console.log(`[process-news] item ${item.id}: impact=${analysis.impact_score} tickers=[${totalConf}] final=${finalTickers.join(",") || "none"}${breaking} ✓`);
   }
 
   return { ok: true, id: item.id };
@@ -348,7 +501,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     aliasMap.set(a.alias.toLowerCase(), a.ticker);
   }
 
-  // ZMIANA A: Load all valid tickers from companies table
+  // Load all valid tickers from companies table
   const { data: companiesData } = await supabase
     .from("companies")
     .select("ticker");

@@ -65,6 +65,10 @@ const BLACKLIST = new Set([
   "wig", "wig20", "mwig40", "swig80",
   // Other ambiguous abbreviations
   "gs", "ab", "pcc", "ons", "ono",
+  // Additional false-positive tickers (common words in Polish/English text)
+  // These are real GPW tickers but too ambiguous as aliases
+  "ten", "sim", "obs", "kru", "ska", "san", "ena", "tgt",
+  "sat", "tag", "bio", "cig", "mdv", "odl", "dad", "ipe",
 ]);
 
 // ── Alias validator ───────────────────────────────────────────────────────────

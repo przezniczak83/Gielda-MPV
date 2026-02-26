@@ -23,6 +23,9 @@ interface NewsItem {
   ai_summary:   string | null;
   is_breaking:  boolean | null;
   key_facts:    KeyFact[] | null;
+  // Grouped mode extras
+  source_count?: number;
+  sources?:      string[];
 }
 
 function factText(fact: KeyFact): string {
@@ -76,6 +79,49 @@ function sentimentDot(s: number | null): string {
   return "🟡";
 }
 
+// ── Source multi-badge component ──────────────────────────────────────────────
+
+function SourceBadge({ item }: { item: NewsItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const count = item.source_count ?? 1;
+
+  return (
+    <div className="flex items-center gap-1 shrink-0 mt-0.5">
+      {item.is_breaking && (
+        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-red-700 text-white uppercase tracking-wider animate-pulse">
+          LIVE
+        </span>
+      )}
+      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide ${
+        SOURCE_COLORS[item.source] ?? "bg-gray-800 text-gray-400"
+      }`}>
+        {item.source}
+      </span>
+      {count > 1 && (
+        <button
+          type="button"
+          onClick={e => { e.preventDefault(); e.stopPropagation(); setExpanded(v => !v); }}
+          title={expanded ? "Zwiń źródła" : `${count} źródła: ${(item.sources ?? []).join(", ")}`}
+          className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors border border-gray-600"
+        >
+          +{count - 1}
+        </button>
+      )}
+      {expanded && count > 1 && (
+        <div className="flex gap-0.5 flex-wrap">
+          {(item.sources ?? []).filter(s => s !== item.source).map(s => (
+            <span key={s} className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase ${
+              SOURCE_COLORS[s] ?? "bg-gray-800 text-gray-400"
+            }`}>
+              {s}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NewsWidget() {
   const [items,   setItems]   = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,9 +133,9 @@ export default function NewsWidget() {
       setLoading(true);
       try {
         const params =
-          filter === "high"   ? "?impact_min=7&limit=10" :
-          filter === "ticker" ? "?category=earnings&category=dividend&impact_min=5&limit=10" :
-          "?limit=10";
+          filter === "high"   ? "?impact_min=7&limit=10&grouped=true" :
+          filter === "ticker" ? "?category=earnings&category=dividend&impact_min=5&limit=10&grouped=true" :
+          "?limit=10&grouped=true";
 
         const res  = await fetch(`/api/news${params}`);
         const data = await res.json() as { items: NewsItem[] };
@@ -152,23 +198,13 @@ export default function NewsWidget() {
               className={`group flex flex-col gap-1 rounded-lg px-3 py-2 transition-colors border ${
                 item.is_breaking
                   ? "bg-red-950/30 border-red-800/60 hover:border-red-700"
-                  : "bg-gray-900/60 border-gray-800 hover:border-gray-700"
+                  : item.source === "espi"
+                    ? "bg-amber-950/20 border-amber-800/30 hover:border-amber-700/50"
+                    : "bg-gray-900/60 border-gray-800 hover:border-gray-700"
               }`}
             >
               <div className="flex items-start gap-2">
-                {/* Breaking badge or source badge */}
-                <div className="flex items-center gap-1 shrink-0 mt-0.5">
-                  {item.is_breaking && (
-                    <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-red-700 text-white uppercase tracking-wider animate-pulse">
-                      LIVE
-                    </span>
-                  )}
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide ${
-                    SOURCE_COLORS[item.source] ?? "bg-gray-800 text-gray-400"
-                  }`}>
-                    {item.source}
-                  </span>
-                </div>
+                <SourceBadge item={item} />
 
                 {/* Title + meta */}
                 <div className="flex-1 min-w-0">

@@ -77,6 +77,30 @@ function timeAgo(iso: string | null): string {
   return d === 1 ? "wczoraj" : `${d} dni temu`;
 }
 
+// ── KROK 3C: Priority sort ────────────────────────────────────────────────────
+// Order: ESPI (24h) > Breaking (4h) > High-impact ≥7 (8h) > Chronological
+
+function prioritySort(items: NewsItem[]): NewsItem[] {
+  const now = Date.now();
+  const h4  = 4  * 60 * 60 * 1000;
+  const h8  = 8  * 60 * 60 * 1000;
+  const h24 = 24 * 60 * 60 * 1000;
+
+  function score(item: NewsItem): number {
+    const age = now - new Date(item.published_at ?? 0).getTime();
+    if (item.source === "espi" && age < h24)              return 3000;
+    if (item.is_breaking && age < h4)                     return 2000;
+    if ((item.impact_score ?? 0) >= 7 && age < h8)       return 1000;
+    return 0;
+  }
+
+  return [...items].sort((a, b) => {
+    const diff = score(b) - score(a);
+    if (diff !== 0) return diff;
+    return new Date(b.published_at ?? 0).getTime() - new Date(a.published_at ?? 0).getTime();
+  });
+}
+
 function sentimentLabel(s: number | null) {
   if (s === null) return { emoji: "🟡", label: "neutralne", cls: "text-yellow-400" };
   if (s >  0.5)  return { emoji: "🟢", label: "pozytywne", cls: "text-emerald-400" };
@@ -131,7 +155,7 @@ export default function NewsPage() {
 
       const res  = await fetch(`/api/news?${params}`);
       const data = await res.json() as { items: NewsItem[] };
-      setItems(data.items ?? []);
+      setItems(prioritySort(data.items ?? []));
     } catch { /* silent */ } finally {
       setLoading(false);
     }
