@@ -24,7 +24,7 @@ function supabase() {
 export async function GET() {
   const { data, error } = await supabase()
     .from("alert_rules")
-    .select("id, rule_name, rule_type, threshold_value, threshold_operator, ticker, is_active, telegram_enabled, created_at")
+    .select("id, rule_name, rule_type, threshold_value, threshold_operator, ticker, is_active, telegram_enabled, cooldown_hours, conditions, created_at")
     .order("id");
 
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
@@ -39,6 +39,8 @@ export async function POST(req: NextRequest) {
     threshold_operator?: string | null;
     ticker?:             string | null;
     telegram_enabled?:   boolean;
+    cooldown_hours?:     number | null;
+    conditions?:         unknown;
   };
 
   if (!body.rule_name?.trim()) {
@@ -57,6 +59,8 @@ export async function POST(req: NextRequest) {
       threshold_operator:  body.threshold_operator ?? null,
       ticker:              body.ticker?.toUpperCase().trim() || null,
       telegram_enabled:    body.telegram_enabled ?? true,
+      cooldown_hours:      body.cooldown_hours ?? 24,
+      conditions:          body.conditions ?? [],
     })
     .select()
     .single();
@@ -71,6 +75,7 @@ export async function PATCH(req: NextRequest) {
     is_active?:         boolean;
     threshold_value?:   number;
     telegram_enabled?:  boolean;
+    cooldown_hours?:    number;
   };
 
   if (!body.id) {
@@ -81,6 +86,7 @@ export async function PATCH(req: NextRequest) {
   if (body.is_active         !== undefined) updates.is_active         = body.is_active;
   if (body.threshold_value   !== undefined) updates.threshold_value   = body.threshold_value;
   if (body.telegram_enabled  !== undefined) updates.telegram_enabled  = body.telegram_enabled;
+  if (body.cooldown_hours    !== undefined) updates.cooldown_hours    = body.cooldown_hours;
 
   if (Object.keys(updates).length === 0) {
     return Response.json({ ok: false, error: "No fields to update" }, { status: 400 });

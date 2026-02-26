@@ -26,6 +26,8 @@ type AlertRule = {
   ticker:             string | null;
   is_active:          boolean;
   telegram_enabled:   boolean;
+  cooldown_hours:     number | null;
+  conditions:         Array<{ field: string; op: string; value: unknown }> | null;
   created_at:         string;
 };
 
@@ -87,6 +89,7 @@ function RulesTab() {
     threshold_operator: ">=",
     ticker:             "",
     telegram_enabled:   true,
+    cooldown_hours:     "24",
   });
 
   const fetchRules = useCallback(async () => {
@@ -170,13 +173,14 @@ function RulesTab() {
           threshold_operator: newRule.threshold_operator || null,
           ticker:             newRule.ticker.trim() || null,
           telegram_enabled:   newRule.telegram_enabled,
+          cooldown_hours:     newRule.cooldown_hours ? parseInt(newRule.cooldown_hours) : 24,
         }),
       });
       const json = await res.json() as { ok: boolean; rule?: AlertRule; error?: string };
       if (!json.ok) throw new Error(json.error ?? "Błąd zapisu");
       if (json.rule) setRules(prev => [...prev, json.rule!]);
       setShowAdd(false);
-      setNewRule({ rule_name: "", rule_type: "impact_score", threshold_value: "", threshold_operator: ">=", ticker: "", telegram_enabled: true });
+      setNewRule({ rule_name: "", rule_type: "impact_score", threshold_value: "", threshold_operator: ">=", ticker: "", telegram_enabled: true, cooldown_hours: "24" });
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
     } finally {
@@ -214,6 +218,7 @@ function RulesTab() {
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Typ</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Próg</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden sm:table-cell">Ticker</th>
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden lg:table-cell">Cooldown</th>
                 <th className="text-center text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Aktywna</th>
                 <th className="text-center text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Telegram</th>
                 <th className="px-4 py-3"></th>
@@ -257,6 +262,14 @@ function RulesTab() {
                   </td>
                   <td className="px-4 py-3 hidden sm:table-cell text-xs text-gray-500 font-mono">
                     {rule.ticker ?? <span className="text-gray-700">wszystkie</span>}
+                  </td>
+                  <td className="px-4 py-3 hidden lg:table-cell text-xs text-gray-500 tabular-nums">
+                    {rule.cooldown_hours !== null ? `${rule.cooldown_hours}h` : "—"}
+                    {(rule.conditions?.length ?? 0) > 0 && (
+                      <span className="ml-1 text-[10px] text-blue-500 font-mono" title={JSON.stringify(rule.conditions)}>
+                        +{rule.conditions!.length}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <button
@@ -351,6 +364,18 @@ function RulesTab() {
                 value={newRule.ticker}
                 onChange={e => setNewRule(p => ({ ...p, ticker: e.target.value.toUpperCase() }))}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Cooldown (godziny)</label>
+              <input
+                type="number"
+                min="1"
+                max="720"
+                placeholder="24"
+                value={newRule.cooldown_hours}
+                onChange={e => setNewRule(p => ({ ...p, cooldown_hours: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white tabular-nums focus:outline-none focus:border-blue-500"
               />
             </div>
           </div>
