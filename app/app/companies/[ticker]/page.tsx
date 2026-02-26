@@ -20,6 +20,19 @@ function isFresh(computedAt: string, maxMinutes: number): boolean {
   return age < maxMinutes;
 }
 
+type CompanyProfile = {
+  ticker:      string;
+  name:        string;
+  sector:      string | null;
+  market:      string;
+  ceo:         string | null;
+  website_url: string | null;
+  ir_url:      string | null;
+  indices:     string[] | null;
+  city:        string | null;
+  description: string | null;
+};
+
 export default async function CompanyPage({
   params,
 }: {
@@ -30,17 +43,31 @@ export default async function CompanyPage({
 
   const db = supabase();
 
-  // ── Try snapshot first (single query, fast) ────────────────────────────────
-  const { data: snapRow } = await db
-    .from("company_snapshot")
-    .select("snapshot, computed_at")
-    .eq("ticker", ticker)
-    .maybeSingle();
+  // ── Always fetch company profile + 2 prices (for change%) ─────────────────
+  const [{ data: company }, { data: prices }, { data: snapRow }] = await Promise.all([
+    db.from("companies")
+      .select("ticker, name, sector, market, ceo, website_url, ir_url, indices, city, description")
+      .eq("ticker", ticker)
+      .maybeSingle(),
+    db.from("price_history")
+      .select("close, date")
+      .eq("ticker", ticker)
+      .order("date", { ascending: false })
+      .limit(2),
+    db.from("company_snapshot")
+      .select("snapshot, computed_at")
+      .eq("ticker", ticker)
+      .maybeSingle(),
+  ]);
 
+  if (!company) notFound();
+
+  const latestPrice = prices?.[0] ?? null;
+  const prevClose   = prices?.[1]?.close ?? null;
+
+  // ── Try snapshot for events ────────────────────────────────────────────────
   if (snapRow && isFresh(snapRow.computed_at, 30)) {
     const snap = snapRow.snapshot as {
-      company:       { ticker: string; name: string; sector: string | null; market: string };
-      price:         { close: number; date: string } | null;
       recent_events: Array<{
         id: string; title: string; event_type: string | null;
         impact_score: number | null; published_at: string | null; url: string | null;
@@ -49,45 +76,28 @@ export default async function CompanyPage({
 
     return (
       <CompanyPageLayout
-        ticker={ticker}
-        name={snap.company.name}
-        market={snap.company.market}
-        sector={snap.company.sector}
+        company={company as CompanyProfile}
         events={snap.recent_events}
-        latestPrice={snap.price}
+        latestPrice={latestPrice}
+        prevClose={prevClose}
       />
     );
   }
 
-  // ── Fallback: live queries (3 parallel) ────────────────────────────────────
-  const [{ data: company }, { data: events }, { data: latestPrice }] = await Promise.all([
-    db.from("companies")
-      .select("ticker, name, sector, market")
-      .eq("ticker", ticker)
-      .maybeSingle(),
-    db.from("company_events")
-      .select("id, title, event_type, impact_score, published_at, url")
-      .eq("ticker", ticker)
-      .order("published_at", { ascending: false })
-      .limit(20),
-    db.from("price_history")
-      .select("close, date")
-      .eq("ticker", ticker)
-      .order("date", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
-
-  if (!company) notFound();
+  // ── Fallback: live events query ────────────────────────────────────────────
+  const { data: events } = await db
+    .from("company_events")
+    .select("id, title, event_type, impact_score, published_at, url")
+    .eq("ticker", ticker)
+    .order("published_at", { ascending: false })
+    .limit(20);
 
   return (
     <CompanyPageLayout
-      ticker={ticker}
-      name={company.name}
-      market={company.market}
-      sector={company.sector}
+      company={company as CompanyProfile}
       events={(events ?? []) as Parameters<typeof CompanyTabs>[0]["events"]}
-      latestPrice={latestPrice as { close: number; date: string } | null}
+      latestPrice={latestPrice}
+      prevClose={prevClose}
     />
   );
 }
@@ -95,20 +105,24 @@ export default async function CompanyPage({
 // ─── Layout (shared between snapshot and live paths) ─────────────────────────
 
 function CompanyPageLayout({
-  ticker,
-  name,
-  market,
-  sector,
+  company,
   events,
   latestPrice,
+  prevClose,
 }: {
-  ticker:      string;
-  name:        string;
-  market:      string;
-  sector:      string | null;
+  company:     CompanyProfile;
   events:      Parameters<typeof CompanyTabs>[0]["events"];
   latestPrice: { close: number; date: string } | null;
+  prevClose:   number | null;
 }) {
+  const { ticker, name, sector, market, ceo, website_url, ir_url, indices, city, description } = company;
+
+  const priceChangePct = (latestPrice && prevClose && prevClose > 0)
+    ? ((latestPrice.close - prevClose) / prevClose * 100)
+    : null;
+
+  const changePositive = priceChangePct !== null && priceChangePct >= 0;
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-4xl mx-auto px-6 py-10">
@@ -137,15 +151,25 @@ function CompanyPageLayout({
         {/* Track visit (client, no render) */}
         <TrackVisit ticker={ticker} name={name} />
 
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 flex-wrap">
+        {/* ── Enriched Header ──────────────────────────────────────────────── */}
+        <div className="mb-8 space-y-3">
+
+          {/* Row 1: ticker + market badge + indices + actions */}
+          <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-5xl font-bold font-mono text-white tracking-tight">
               {ticker}
             </h1>
-            <span className="text-xs px-2.5 py-1 rounded-md bg-gray-800 text-gray-400 font-mono">
+            <span className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 font-mono">
               {market}
             </span>
+            {indices?.map(idx => (
+              <span
+                key={idx}
+                className="text-xs px-2 py-1 rounded bg-blue-900/30 text-blue-400 border border-blue-800/50 font-medium"
+              >
+                {idx}
+              </span>
+            ))}
             <FavoriteButton ticker={ticker} />
             <Link
               href={`/reports/${ticker}`}
@@ -154,9 +178,66 @@ function CompanyPageLayout({
               📄 Raport AI
             </Link>
           </div>
-          <div className="mt-2 text-xl text-gray-300 font-medium">{name}</div>
-          {sector && (
-            <div className="mt-1 text-sm text-gray-500">{sector}</div>
+
+          {/* Row 2: full name + sector + city */}
+          <div>
+            <div className="text-xl text-gray-200 font-medium">{name}</div>
+            <div className="text-sm text-gray-500 mt-0.5">
+              {[sector, city].filter(Boolean).join(" · ")}
+            </div>
+          </div>
+
+          {/* Row 3: price + change */}
+          {latestPrice && (
+            <div className="flex items-baseline gap-3">
+              <span className="text-3xl font-bold text-white tabular-nums">
+                {Number(latestPrice.close).toFixed(2)} PLN
+              </span>
+              {priceChangePct !== null && (
+                <span className={`text-sm font-semibold tabular-nums ${changePositive ? "text-green-400" : "text-red-400"}`}>
+                  {changePositive ? "+" : ""}{priceChangePct.toFixed(2)}%
+                </span>
+              )}
+              <span className="text-xs text-gray-600">{latestPrice.date}</span>
+            </div>
+          )}
+
+          {/* Row 4: CEO + links */}
+          {(ceo || website_url || ir_url) && (
+            <div className="flex items-center gap-4 text-xs flex-wrap">
+              {ceo && (
+                <span className="text-gray-400">
+                  CEO: <span className="text-gray-200">{ceo}</span>
+                </span>
+              )}
+              {website_url && (
+                <a
+                  href={website_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-gray-400 hover:text-blue-400 transition-colors"
+                >
+                  🌐 Strona www
+                </a>
+              )}
+              {ir_url && (
+                <a
+                  href={ir_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-gray-400 hover:text-blue-400 transition-colors"
+                >
+                  📊 Relacje Inwestorskie
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* Row 5: description */}
+          {description && (
+            <p className="text-sm text-gray-400 leading-relaxed max-w-2xl border-l-2 border-gray-800 pl-3">
+              {description}
+            </p>
           )}
         </div>
 

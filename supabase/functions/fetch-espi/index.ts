@@ -6,8 +6,7 @@
 //   2. GPW RSS         — https://www.gpw.pl/komunikaty?type=rss
 //   3. STUB_RECORDS    — fallback so cron never fails silently
 //
-// Ticker matching: extract all-caps 2-6 char words from title,
-// compare against watchlist fetched from Supabase companies table.
+// KROK 4: extracts body_text + PDF attachments from RSS <description>
 //
 // Deploy: supabase functions deploy fetch-espi --project-ref pftgmorsthoezhmojjpg
 
@@ -16,11 +15,19 @@ import { hashUrl }      from "../_shared/hash.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface EspiAttachment {
+  name: string;
+  url:  string;
+  type: string;
+}
+
 interface EspiRecord {
   ticker:       string;
   title:        string;
   url:          string | null;
   published_at: string | null;
+  body_text:    string | null;
+  attachments:  EspiAttachment[];
 }
 
 // ─── Stub fallback ────────────────────────────────────────────────────────────
@@ -31,6 +38,8 @@ const STUB_RECORDS: EspiRecord[] = [
     title:        "ESPI stub: fallback — wszystkie źródła RSS niedostępne",
     url:          null,
     published_at: new Date().toISOString(),
+    body_text:    null,
+    attachments:  [],
   },
 ];
 
@@ -66,19 +75,13 @@ function extractTicker(
   description: string,
   tickers:     Set<string>,
 ): string | null {
-  // Company name is before the first ":"
   const companyPart = title.split(":")[0].toUpperCase();
-
-  // Extract all-caps words of 2–6 chars
   const words = companyPart.match(/\b[A-Z0-9]{2,6}\b/g) ?? [];
   for (const w of words) {
     if (tickers.has(w)) return w;
   }
-
-  // Secondary: PDF filename prefix in description: "TICKER_filename.pdf"
   const pdfMatch = description.match(/\b([A-Z0-9]{2,6})_[A-Z0-9]/);
   if (pdfMatch && tickers.has(pdfMatch[1])) return pdfMatch[1];
-
   return null;
 }
 
@@ -90,6 +93,76 @@ function parsePubDate(raw: string): string | null {
   } catch {
     return null;
   }
+}
+
+// ─── KROK 4: Extract body text + PDF attachments from RSS description ─────────
+
+/** Extract body text and PDF/document attachments from an RSS <description> field. */
+function extractBodyAndAttachments(descHtml: string): {
+  body_text:   string | null;
+  attachments: EspiAttachment[];
+} {
+  if (!descHtml) return { body_text: null, attachments: [] };
+
+  const attachments: EspiAttachment[] = [];
+  const seen = new Set<string>();
+
+  // Extract PDF links
+  const pdfRe = /<a[^>]+href="([^"]*\.pdf[^"]*)"[^>]*>([^<]*)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = pdfRe.exec(descHtml)) !== null) {
+    const url  = m[1].trim();
+    const name = m[2].trim() || url.split("/").pop() || "Załącznik";
+    if (url && !seen.has(url)) {
+      seen.add(url);
+      attachments.push({ name, url, type: "pdf" });
+    }
+  }
+
+  // Extract other document links (xlsx, docx, zip)
+  const docRe = /<a[^>]+href="([^"]*\.(xlsx?|docx?|zip)[^"]*)"[^>]*>([^<]*)<\/a>/gi;
+  while ((m = docRe.exec(descHtml)) !== null) {
+    const url  = m[1].trim();
+    const ext  = m[2].toLowerCase();
+    const name = m[3].trim() || url.split("/").pop() || "Załącznik";
+    if (url && !seen.has(url)) {
+      seen.add(url);
+      attachments.push({ name, url, type: ext });
+    }
+  }
+
+  // Also try bare href links (no inner text) — some ESPI RSS encode them differently
+  const bareRe = /href="([^"]+\.pdf)"/gi;
+  while ((m = bareRe.exec(descHtml)) !== null) {
+    const url = m[1].trim();
+    if (url && !seen.has(url)) {
+      seen.add(url);
+      attachments.push({ name: url.split("/").pop() || "Załącznik", url, type: "pdf" });
+    }
+  }
+
+  // Strip HTML to plain text (preserve line breaks)
+  const body_text = descHtml
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<p[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#\d+;/g, "")
+    .replace(/&[a-z]+;/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 3000);
+
+  return {
+    body_text: body_text.length > 50 ? body_text : null,
+    attachments,
+  };
 }
 
 interface FetchResult {
@@ -121,21 +194,23 @@ async function fetchRSS(url: string, tickers: Set<string>): Promise<FetchResult>
 
     if (!rawTitle) continue;
 
-    // Try to match watchlist ticker; fall back to company name abbreviation
     const watchlistTicker = extractTicker(rawTitle, desc, tickers);
     if (watchlistTicker) watchlistHit++;
 
-    // Extract company name (before ":") as best-effort ticker if no watchlist match
-    const companyRaw = rawTitle.split(":")[0].trim();
-    // Take first uppercase word of 2–6 chars as ticker candidate
+    const companyRaw     = rawTitle.split(":")[0].trim();
     const candidateMatch = companyRaw.toUpperCase().match(/\b[A-Z0-9]{2,6}\b/);
     const tickerFinal    = watchlistTicker ?? (candidateMatch?.[0] || companyRaw.slice(0, 6));
+
+    // KROK 4: extract body text + attachments from RSS description
+    const { body_text, attachments } = extractBodyAndAttachments(desc);
 
     records.push({
       ticker:       tickerFinal,
       title:        rawTitle.split(":").slice(1).join(":").trim() || rawTitle,
       url:          link || null,
       published_at: parsePubDate(pubDate),
+      body_text,
+      attachments,
     });
   }
 
@@ -192,7 +267,9 @@ Deno.serve(async (_req: Request): Promise<Response> => {
         watchlistHit = result.watchlistHit;
         totalItems   = result.totalItems;
         sourceUsed   = src.name;
-        console.log(`[fetch-espi] ${src.name}: ${result.totalItems} total, ${result.watchlistHit} watchlist hits → inserting ${result.records.length}`);
+        const withBody  = result.records.filter(r => r.body_text).length;
+        const withAtts  = result.records.filter(r => r.attachments.length > 0).length;
+        console.log(`[fetch-espi] ${src.name}: ${result.totalItems} total, ${result.watchlistHit} watchlist hits → ${result.records.length} records (body_text: ${withBody}, attachments: ${withAtts})`);
         break;
       }
       console.log(`[fetch-espi] ${src.name}: returned 0 items, trying next`);
@@ -202,7 +279,6 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     }
   }
 
-  // Fallback to stubs if all RSS sources fail
   if (records.length === 0) {
     console.warn("[fetch-espi] All RSS sources failed — using stub fallback");
     records    = STUB_RECORDS;
@@ -234,7 +310,6 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   console.log(`[fetch-espi] Inserted ${inserted} records into raw_ingest ✓`);
 
   // ── Bridge: also write to news_items (parallel to raw_ingest) ────────────
-  // Skips stub records (they have no real URL)
   if (sourceUsed !== "stub") {
     let newsInserted = 0;
     let newsSkipped  = 0;
@@ -258,10 +333,15 @@ Deno.serve(async (_req: Request): Promise<Response> => {
           published_at:  record.published_at,
           tickers:       [record.ticker],
           category:      "regulatory",
-          impact_score:  8,       // ESPI always high significance
+          impact_score:  8,
           ai_processed:  false,
           telegram_sent: false,
-        }, { onConflict: "url_hash" })  // UPDATE on conflict (not ignore)
+          // KROK 4: store body text + PDF attachments
+          body_text:    record.body_text,
+          attachments:  record.attachments.length > 0
+            ? record.attachments
+            : undefined,
+        }, { onConflict: "url_hash" })
         .select("id");
 
       if (newsErr) {
@@ -270,7 +350,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       } else if (upsertData && upsertData.length > 0) {
         newsInserted++;
       } else {
-        newsSkipped++; // conflict — record already existed, updated in-place
+        newsSkipped++;
       }
     }
 

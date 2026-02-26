@@ -121,13 +121,20 @@ export async function GET(req: NextRequest) {
   let items = (data ?? []) as DBItem[];
 
   // ── Strict confidence filter ───────────────────────────────────────────────
-  // When a ticker is queried with strict=true, only return articles where
-  // that ticker's confidence >= 0.7.
+  // When strict=true: require ticker_confidence[ticker] >= 0.7.
+  // FALLBACK: if ticker_confidence is null/empty (old articles before migration
+  // 0057), allow the article if the ticker is directly in tickers[] — those
+  // articles were matched by the old pipeline and are trustworthy.
   if (strict && tickers.length > 0) {
     items = items.filter(item => {
+      // New articles: check confidence map
       const conf = item.ticker_confidence;
-      if (!conf) return false;
-      return tickers.some(t => (conf[t] ?? 0) >= 0.7);
+      if (conf && Object.keys(conf).length > 0) {
+        return tickers.some(t => (conf[t] ?? 0) >= 0.7);
+      }
+      // Old articles (empty/null ticker_confidence): fall back to tickers[]
+      const tickerList = item.tickers ?? [];
+      return tickers.some(t => tickerList.includes(t));
     });
   }
 

@@ -4,6 +4,7 @@
 // of macro indicators and their impact on GPW.
 
 import { useState, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 
 interface MacroRow {
   name:       string;
@@ -129,12 +130,22 @@ export default function MacroInterpretation({ indicators }: Props) {
         </span>
         <span className="text-xs text-gray-600">Claude Haiku</span>
       </div>
-      <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
-        {analysis}
+      <div className="text-sm text-gray-200 leading-relaxed
+        [&_p]:mb-3 [&_p:last-child]:mb-0
+        [&_strong]:text-white [&_strong]:font-semibold
+        [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mb-3 [&_ul]:space-y-1
+        [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:mb-3
+        [&_li]:text-gray-300
+        [&_h1]:text-base [&_h1]:font-bold [&_h1]:text-white [&_h1]:mb-2
+        [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-gray-100 [&_h2]:mb-2
+        [&_h3]:text-sm [&_h3]:font-medium [&_h3]:text-gray-200 [&_h3]:mb-1
+        [&_blockquote]:border-l-2 [&_blockquote]:border-gray-600 [&_blockquote]:pl-3 [&_blockquote]:text-gray-400
+        [&_code]:bg-gray-800 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs">
+        <ReactMarkdown>{analysis}</ReactMarkdown>
         {loading && (
           <span className="inline-block w-0.5 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" />
         )}
-      </p>
+      </div>
     </div>
   );
 }

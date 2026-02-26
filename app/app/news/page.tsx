@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { NewsCardFull, NewsCardCompact, type NewsCardItem } from "../components/NewsCard";
+import { NewsCardFull, NewsCardCompact, NewsCardEspi, type NewsCardItem } from "../components/NewsCard";
 
 interface StatsData {
   total_24h:     number;
@@ -309,9 +309,9 @@ export default function NewsPage() {
                     {espiItems.length}
                   </span>
                 </div>
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-2">
                   {espiItems.map(item => (
-                    <NewsCardCompact key={item.id} item={item} />
+                    <NewsCardEspi key={item.id} item={item} />
                   ))}
                 </div>
                 <div className="border-t border-gray-800/60 mt-4 mb-4" />

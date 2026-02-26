@@ -11,6 +11,12 @@ interface KeyFact {
   impact?:     "positive" | "negative" | "neutral";
 }
 
+interface Attachment {
+  name: string;
+  url:  string;
+  type?: string;
+}
+
 export interface NewsCardItem {
   id:              number;
   url:             string;
@@ -27,6 +33,8 @@ export interface NewsCardItem {
   source_count?:   number;
   sources?:        string[];
   relevance_score?: number | null;
+  body_text?:      string | null;
+  attachments?:    Attachment[] | null;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -49,7 +57,6 @@ export const SOURCE_COLORS: Record<string, string> = {
   comparic: "bg-violet-900/40 text-violet-300",
 };
 
-// Left border accent color for the card
 function borderAccent(item: NewsCardItem): string {
   if (item.source === "espi")                        return "border-l-amber-600";
   if (item.is_breaking)                              return "border-l-red-600";
@@ -61,7 +68,7 @@ function borderAccent(item: NewsCardItem): string {
 }
 
 function cardBg(item: NewsCardItem): string {
-  if (item.is_breaking)    return "bg-red-950/20 border-red-800/40";
+  if (item.is_breaking)       return "bg-red-950/20 border-red-800/40";
   if (item.source === "espi") return "bg-amber-950/15 border-amber-800/30";
   return "bg-gray-900/40 border-gray-800";
 }
@@ -100,7 +107,15 @@ function factText(fact: KeyFact, maxLen = 65): string {
   return text.length > maxLen ? text.slice(0, maxLen - 3) + "…" : text;
 }
 
-// ── Sub: Source badge + multi-source expand ────────────────────────────────────
+function getDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+// ── Sub: Source badge ──────────────────────────────────────────────────────────
 
 function SourceBadge({ item }: { item: NewsCardItem }) {
   const count = item.source_count ?? 1;
@@ -123,58 +138,91 @@ function SourceBadge({ item }: { item: NewsCardItem }) {
   );
 }
 
-// ── Full card variant ──────────────────────────────────────────────────────────
+// ── Ticker chips ───────────────────────────────────────────────────────────────
 
-export function NewsCardFull({ item }: { item: NewsCardItem }) {
-  const sd = sentimentDot(item.sentiment);
+function TickerChips({ tickers }: { tickers: string[] | null }) {
+  if (!tickers?.length) return null;
   return (
-    <a
-      href={item.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`group relative block rounded-xl border border-l-4 p-4 transition-colors hover:brightness-110 ${cardBg(item)} ${borderAccent(item)}`}
-    >
-      {/* Top row: source + live badge + time */}
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <SourceBadge item={item} />
-          {item.is_breaking && (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-700 text-white uppercase animate-pulse tracking-widest">
-              LIVE
+    <div className="flex gap-1 flex-wrap">
+      {tickers.slice(0, 4).map(t => (
+        <Link
+          key={t}
+          href={`/companies/${t}`}
+          onClick={e => e.stopPropagation()}
+          className="font-mono text-[10px] text-blue-400 hover:text-blue-300 bg-blue-900/20 border border-blue-800/30 px-1.5 py-0.5 rounded transition-colors"
+        >
+          {t}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+// ── ESPI card variant ──────────────────────────────────────────────────────────
+// Used for ESPI regulatory filings — prominent amber style with body blockquote
+
+export function NewsCardEspi({ item }: { item: NewsCardItem }) {
+  const sd      = sentimentDot(item.sentiment);
+  const domain  = getDomain(item.url);
+  const bodyText = item.body_text ?? item.ai_summary ?? null;
+  const atts     = item.attachments?.filter(a => a.url) ?? [];
+
+  return (
+    <div className={`rounded-xl border border-l-4 border-amber-800/40 border-l-amber-500 bg-amber-950/20 overflow-hidden`}>
+      {/* Header */}
+      <div className="px-4 pt-3 pb-2">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide bg-amber-900/70 text-amber-300">
+              ESPI
             </span>
-          )}
-          {item.category && (
-            <span className="text-[9px] text-gray-500 bg-gray-800/60 px-1.5 py-0.5 rounded">
-              {item.category}
-            </span>
-          )}
+            {item.is_breaking && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-700 text-white uppercase animate-pulse tracking-widest">
+                LIVE
+              </span>
+            )}
+            {item.category && (
+              <span className="text-[9px] text-amber-600 bg-amber-900/30 px-1.5 py-0.5 rounded">
+                {item.category}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] text-gray-600 shrink-0 tabular-nums">{timeAgo(item.published_at)}</span>
         </div>
-        <span className="text-[10px] text-gray-600 shrink-0 tabular-nums">
-          {timeAgo(item.published_at)}
-        </span>
+
+        {/* Title */}
+        <a
+          href={item.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-sm font-semibold text-amber-100 hover:text-white leading-snug mb-1 transition-colors"
+        >
+          {item.title}
+        </a>
+
+        <div className="text-[10px] text-gray-600">{domain}</div>
       </div>
 
-      {/* Title */}
-      <p className={`text-sm font-medium leading-snug line-clamp-2 group-hover:text-white transition-colors mb-1 ${
-        item.is_breaking ? "text-red-200" : "text-gray-100"
-      }`}>
-        {item.title}
-      </p>
-
-      {/* AI summary */}
-      {item.ai_summary && (
-        <p className="text-[11px] text-gray-500 leading-snug line-clamp-2 mb-1.5">
-          {item.ai_summary}
-        </p>
+      {/* Body blockquote */}
+      {bodyText && (
+        <div className="mx-4 mb-3 border-l-2 border-amber-700/50 pl-3 bg-amber-950/30 rounded-r py-2">
+          <p className="text-xs text-amber-200/70 leading-relaxed line-clamp-5 whitespace-pre-line">
+            {bodyText}
+          </p>
+        </div>
       )}
 
-      {/* Key facts chips */}
+      {/* Key facts */}
       {item.key_facts && item.key_facts.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {item.key_facts.slice(0, 3).map((fact, i) => (
+        <div className="px-4 pb-2 flex flex-wrap gap-1">
+          {item.key_facts.slice(0, 4).map((fact, i) => (
             <span
               key={i}
-              className="text-[9px] text-gray-500 bg-gray-800/70 border border-gray-700/50 px-1.5 py-0.5 rounded"
+              className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                fact.impact === "positive" ? "bg-green-900/30 border-green-700/40 text-green-300"
+                : fact.impact === "negative" ? "bg-red-900/30 border-red-700/40 text-red-300"
+                : "bg-gray-800/70 border-gray-700/50 text-gray-400"
+              }`}
             >
               {factText(fact)}
             </span>
@@ -182,22 +230,122 @@ export function NewsCardFull({ item }: { item: NewsCardItem }) {
         </div>
       )}
 
-      {/* Meta row: tickers | impact | sentiment */}
-      <div className="flex flex-wrap items-center gap-2 mt-1">
-        {item.tickers?.length ? (
-          <div className="flex gap-1 flex-wrap">
-            {item.tickers.slice(0, 4).map(t => (
-              <Link
-                key={t}
-                href={`/companies/${t}`}
-                onClick={e => e.stopPropagation()}
-                className="font-mono text-[10px] text-blue-400 hover:text-blue-300 bg-blue-900/20 border border-blue-800/30 px-1.5 py-0.5 rounded transition-colors"
-              >
-                {t}
-              </Link>
-            ))}
+      {/* PDF attachments */}
+      {atts.length > 0 && (
+        <div className="px-4 pb-2 flex flex-wrap gap-1.5">
+          {atts.map((att, i) => (
+            <a
+              key={i}
+              href={att.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 bg-amber-900/20 border border-amber-800/30 px-2 py-0.5 rounded transition-colors"
+            >
+              <span>📄</span>
+              <span className="truncate max-w-[180px]">{att.name || "Załącznik"}</span>
+            </a>
+          ))}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="px-4 pb-3 flex flex-wrap items-center gap-2">
+        <TickerChips tickers={item.tickers} />
+        {item.impact_score !== null && (
+          <span className={`text-[10px] tabular-nums ${impactClass(item.impact_score)}`}>
+            {item.impact_score}/10
+          </span>
+        )}
+        {item.sentiment !== null && (
+          <span className={`flex items-center gap-1 text-[10px] ${sd.cls}`}>
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${sd.dot}`} />
+            {sd.label}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Full card variant ──────────────────────────────────────────────────────────
+
+export function NewsCardFull({ item }: { item: NewsCardItem }) {
+  const sd     = sentimentDot(item.sentiment);
+  const domain = getDomain(item.url);
+
+  return (
+    <div className={`relative rounded-xl border border-l-4 overflow-hidden transition-colors ${cardBg(item)} ${borderAccent(item)}`}>
+      {/* Top: source + time */}
+      <div className="px-4 pt-3 pb-0">
+        <div className="flex items-center justify-between gap-2 mb-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <SourceBadge item={item} />
+            {item.is_breaking && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-700 text-white uppercase animate-pulse tracking-widest">
+                LIVE
+              </span>
+            )}
+            {item.category && (
+              <span className="text-[9px] text-gray-500 bg-gray-800/60 px-1.5 py-0.5 rounded">
+                {item.category}
+              </span>
+            )}
           </div>
-        ) : null}
+          <span className="text-[10px] text-gray-600 shrink-0 tabular-nums">
+            {timeAgo(item.published_at)}
+          </span>
+        </div>
+
+        {/* Title — SOURCE · Title format */}
+        <a
+          href={item.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`group block text-sm font-medium leading-snug hover:text-white transition-colors mb-1 ${
+            item.is_breaking ? "text-red-200" : "text-gray-100"
+          }`}
+        >
+          <span className="text-gray-500 font-normal text-[11px] mr-1.5 uppercase tracking-wide">
+            {item.source} ·
+          </span>
+          {item.title}
+        </a>
+
+        {/* Visible domain */}
+        <div className="text-[10px] text-gray-700 mb-2">{domain}</div>
+      </div>
+
+      {/* AI summary as blockquote */}
+      {item.ai_summary && (
+        <div className="mx-4 mb-2 border-l-2 border-gray-700 pl-3">
+          <p className="text-[11px] text-gray-400 leading-snug line-clamp-3">
+            {item.ai_summary}
+          </p>
+        </div>
+      )}
+
+      {/* Key facts chips */}
+      {item.key_facts && item.key_facts.length > 0 && (
+        <div className="px-4 pb-2 flex flex-wrap gap-1">
+          {item.key_facts.slice(0, 3).map((fact, i) => (
+            <span
+              key={i}
+              className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                fact.impact === "positive" ? "bg-green-900/30 border-green-700/40 text-green-300"
+                : fact.impact === "negative" ? "bg-red-900/30 border-red-700/40 text-red-300"
+                : "bg-gray-800/70 border-gray-700/50 text-gray-500"
+              }`}
+            >
+              {factText(fact)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Footer: tickers + impact + sentiment */}
+      <div className="px-4 pb-3 flex flex-wrap items-center gap-2">
+        <TickerChips tickers={item.tickers} />
 
         {item.impact_score !== null && (
           <span className={`text-[10px] tabular-nums ${impactClass(item.impact_score)}`}>
@@ -212,7 +360,7 @@ export function NewsCardFull({ item }: { item: NewsCardItem }) {
           </span>
         )}
       </div>
-    </a>
+    </div>
   );
 }
 

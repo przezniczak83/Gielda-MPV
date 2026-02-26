@@ -164,15 +164,19 @@ interface FREDResponse {
 }
 
 async function fetchFREDSeries(
-  apiKey: string,
+  apiKey:   string,
   seriesId: string,
+  useYoY:   boolean = false,  // if true: fetch 14 months, compute YoY change
 ): Promise<{ current: number; previous: number; date: string } | null> {
+  // For YoY calculation (e.g. CPIAUCSL index level → percent change),
+  // we need at least 13 months of data.
+  const limit = useYoY ? 14 : 2;
   const url =
     `https://api.stlouisfed.org/fred/series/observations` +
     `?series_id=${seriesId}` +
     `&api_key=${apiKey}` +
     `&file_type=json` +
-    `&limit=2` +
+    `&limit=${limit}` +
     `&sort_order=desc`;
   try {
     const res = await fetch(url);
@@ -186,6 +190,26 @@ async function fetchFREDSeries(
       log.warn(`FRED ${seriesId} insufficient valid data`);
       return null;
     }
+
+    if (useYoY) {
+      // obs[0] = most recent, obs[12] = ~12 months ago (sort_order=desc)
+      const current = parseFloat(obs[0].value);
+      const yearAgo = parseFloat((obs[12] ?? obs[obs.length - 1]).value);
+      if (isNaN(current) || isNaN(yearAgo) || yearAgo === 0) {
+        log.warn(`FRED ${seriesId} YoY calc failed (current=${current}, yearAgo=${yearAgo})`);
+        return null;
+      }
+      const yoy     = parseFloat(((current / yearAgo - 1) * 100).toFixed(2));
+      const prevYoY = obs.length >= 13
+        ? parseFloat(((parseFloat(obs[1].value) / parseFloat((obs[13] ?? obs[obs.length - 1]).value) - 1) * 100).toFixed(2))
+        : yoy;
+      return {
+        current:  yoy,
+        previous: prevYoY,
+        date:     obs[0].date,
+      };
+    }
+
     return {
       current:  parseFloat(obs[0].value),
       previous: parseFloat(obs[1].value),
@@ -310,15 +334,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!fredKey) {
     log.info("FRED_API_KEY not set — skipping USA macro (see lessons-learned.md for setup)");
   } else {
-    const FRED_SERIES: Array<{ id: string; name: string; unit: string }> = [
+    const FRED_SERIES: Array<{ id: string; name: string; unit: string; yoy?: boolean }> = [
       { id: "FEDFUNDS", name: "Fed Funds Rate",    unit: "%" },
-      { id: "CPIAUCSL", name: "US CPI (YoY)",      unit: "%" },
+      { id: "CPIAUCSL", name: "US CPI (YoY)",      unit: "%", yoy: true },  // index → YoY%
       { id: "DGS10",    name: "US 10Y Treasury",   unit: "%" },
       { id: "UNRATE",   name: "US Unemployment",   unit: "%" },
     ];
 
     const fredResults = await Promise.all(
-      FRED_SERIES.map(s => fetchFREDSeries(fredKey, s.id))
+      FRED_SERIES.map(s => fetchFREDSeries(fredKey, s.id, s.yoy ?? false))
     );
 
     for (let i = 0; i < FRED_SERIES.length; i++) {
