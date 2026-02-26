@@ -21,9 +21,22 @@ export default function TopMovers() {
 
   useEffect(() => {
     fetch("/api/top-movers")
-      .then((r) => r.json())
-      .then((d) => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<TopMoversData>;
+      })
+      .then((d) => {
+        // Ensure expected shape
+        setData({
+          gainers: Array.isArray(d?.gainers) ? d.gainers : [],
+          losers:  Array.isArray(d?.losers)  ? d.losers  : [],
+        });
+        setLoading(false);
+      })
+      .catch(() => {
+        setData({ gainers: [], losers: [] });
+        setLoading(false);
+      });
   }, []);
 
   if (loading) {
@@ -32,7 +45,7 @@ export default function TopMovers() {
     );
   }
 
-  const noData = !data || (data.gainers.length === 0 && data.losers.length === 0);
+  const noData = !data || ((data.gainers?.length ?? 0) === 0 && (data.losers?.length ?? 0) === 0);
 
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
