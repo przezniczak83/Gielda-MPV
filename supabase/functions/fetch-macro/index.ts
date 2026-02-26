@@ -1,9 +1,12 @@
 // supabase/functions/fetch-macro/index.ts
-// Fetches macro-economic indicators from NBP API + FRED API (when key available).
+// Fetches macro-economic indicators from NBP API + FRED API (when key available)
+// + Stooq WIBOR rates + GUS BDL CPI.
 //
 // Data sources:
-//   NBP API — exchange rates EUR/PLN, USD/PLN, GBP/PLN, CHF/PLN (always)
-//   FRED API — Fed Funds Rate, US CPI, 10Y Treasury, Unemployment (when FRED_API_KEY set)
+//   NBP API    — exchange rates EUR/PLN, USD/PLN, GBP/PLN, CHF/PLN (always)
+//   Stooq CSV  — WIBOR 1M, 3M, 6M (always, no API key needed)
+//   GUS BDL    — PL CPI YoY (always, free API, no key)
+//   FRED API   — Fed Funds Rate, US CPI, 10Y Treasury, Unemployment (when FRED_API_KEY set)
 //
 // NOTE: NBP endpoints for CPI, WIBOR (/api/cenycen/, /api/stopy/) do NOT exist.
 //
@@ -55,6 +58,96 @@ async function fetchNBPRate(currencyCode: string): Promise<{ current: NBPRate; p
     };
   } catch (err) {
     log.warn(`NBP ${currencyCode} fetch error:`, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+// ─── Stooq CSV fetcher (WIBOR rates) ─────────────────────────────────────────
+
+async function fetchStooqCSV(
+  symbol: string,
+): Promise<{ current: number; previous: number; date: string } | null> {
+  // Returns last 5 trading days; symbol e.g. "^wibor1m"
+  const url = `https://stooq.pl/q/d/l/?s=${encodeURIComponent(symbol)}&i=d&l=5`;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) {
+      log.warn(`Stooq ${symbol} HTTP ${res.status}`);
+      return null;
+    }
+    const text = await res.text();
+    const lines = text.trim().split("\n").slice(1).filter(l => l.trim()); // skip header
+    if (lines.length < 2) {
+      log.warn(`Stooq ${symbol} insufficient rows`);
+      return null;
+    }
+    // CSV: Date,Open,High,Low,Close,Volume — use Close (index 4)
+    const parseClose = (line: string) => {
+      const cols = line.split(",");
+      return cols.length >= 5 ? parseFloat(cols[4]) : NaN;
+    };
+    const current  = parseClose(lines[lines.length - 1]);
+    const previous = parseClose(lines[lines.length - 2]);
+    const date     = lines[lines.length - 1].split(",")[0];
+    if (isNaN(current) || isNaN(previous)) {
+      log.warn(`Stooq ${symbol} parse failed`);
+      return null;
+    }
+    return { current, previous, date };
+  } catch (err) {
+    log.warn(`Stooq ${symbol} error:`, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+// ─── GUS BDL CPI fetcher ──────────────────────────────────────────────────────
+
+interface BDLResult {
+  id:     string;
+  values: Array<{ year: number; period: number; val: number }>;
+}
+
+interface BDLResponse {
+  results: BDLResult[];
+}
+
+async function fetchGUSCPI(): Promise<{ current: number; previous: number; period: string } | null> {
+  // Variable 645 = CPI (indices of consumer goods and services prices, same month previous year = 100)
+  // Returns value like 102.4 meaning +2.4% YoY
+  const year = new Date().getFullYear();
+  const url  = `https://bdl.stat.gov.pl/api/v1/data/by-variable/645?unit-level=0&year=${year}&year=${year - 1}&format=json&page-size=20`;
+  try {
+    const res = await fetch(url, {
+      headers: { "Accept": "application/json", "User-Agent": "GieldaMPV/1.0" },
+    });
+    if (!res.ok) {
+      log.warn(`GUS BDL CPI HTTP ${res.status}`);
+      return null;
+    }
+    const data = await res.json() as BDLResponse;
+    const results = data?.results ?? [];
+    if (!results.length || !results[0].values?.length) {
+      log.warn("GUS BDL CPI: no data");
+      return null;
+    }
+    // Combine all values sorted by year+period descending
+    const allVals = results.flatMap(r => r.values ?? [])
+      .sort((a, b) => b.year !== a.year ? b.year - a.year : b.period - a.period);
+    if (allVals.length < 2) {
+      log.warn("GUS BDL CPI: insufficient records");
+      return null;
+    }
+    // Convert index (e.g. 102.4) to YoY % change (e.g. 2.4)
+    const toYoY = (v: number) => parseFloat((v - 100).toFixed(2));
+    const curr = allVals[0];
+    const prev = allVals[1];
+    return {
+      current:  toYoY(curr.val),
+      previous: toYoY(prev.val),
+      period:   `${curr.year}-${String(curr.period).padStart(2, "0")}`,
+    };
+  } catch (err) {
+    log.warn("GUS BDL CPI error:", err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -165,6 +258,51 @@ Deno.serve(async (req: Request): Promise<Response> => {
       period:     current.effectiveDate,
     });
     fetched.push(`${code}/PLN`);
+  }
+
+  // ── WIBOR rates from Stooq (always) ───────────────────────────────────────
+  const WIBOR_SYMBOLS: Array<{ symbol: string; name: string }> = [
+    { symbol: "^wibor1m", name: "WIBOR 1M" },
+    { symbol: "^wibor3m", name: "WIBOR 3M" },
+    { symbol: "^wibor6m", name: "WIBOR 6M" },
+  ];
+
+  const wiborResults = await Promise.all(WIBOR_SYMBOLS.map(w => fetchStooqCSV(w.symbol)));
+  for (let i = 0; i < WIBOR_SYMBOLS.length; i++) {
+    const { name } = WIBOR_SYMBOLS[i];
+    const data     = wiborResults[i];
+    if (!data) { failed.push(name); continue; }
+    const changePct = data.previous > 0
+      ? parseFloat(((data.current - data.previous) / data.previous * 100).toFixed(4))
+      : null;
+    rows.push({
+      name,
+      value:      data.current,
+      prev_value: data.previous,
+      change_pct: changePct,
+      source:     "Stooq",
+      period:     data.date,
+    });
+    fetched.push(name);
+  }
+
+  // ── GUS BDL — PL CPI ──────────────────────────────────────────────────────
+  const cpiData = await fetchGUSCPI();
+  if (!cpiData) {
+    failed.push("PL CPI");
+  } else {
+    const changePct = cpiData.previous !== 0
+      ? parseFloat(((cpiData.current - cpiData.previous) / Math.abs(cpiData.previous) * 100).toFixed(4))
+      : null;
+    rows.push({
+      name:       "PL CPI (YoY)",
+      value:      cpiData.current,
+      prev_value: cpiData.previous,
+      change_pct: changePct,
+      source:     "GUS BDL",
+      period:     cpiData.period,
+    });
+    fetched.push("PL CPI");
   }
 
   // ── FRED data (when key available) ────────────────────────────────────────

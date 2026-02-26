@@ -1,5 +1,5 @@
 // app/app/macro/page.tsx
-// Macro indicators page — NBP exchange rates + optional FRED USA data + Claude Haiku interpretation.
+// Macro indicators page — NBP exchange rates + Stooq WIBOR + GUS BDL CPI + optional FRED USA data + Claude Haiku interpretation.
 
 import { createClient } from "@supabase/supabase-js";
 import MacroInterpretation from "../components/MacroInterpretation";
@@ -40,7 +40,10 @@ function ArrowBadge({ change, invertColor = false }: { change: number | null; in
 }
 
 function IndicatorCard({ ind, invertColor = false }: { ind: MacroRow; invertColor?: boolean }) {
-  const isPercent = ["Fed Funds Rate", "US CPI (YoY)", "US 10Y Treasury", "US Unemployment"].includes(ind.name);
+  const isPercent = [
+    "Fed Funds Rate", "US CPI (YoY)", "US 10Y Treasury", "US Unemployment",
+    "WIBOR 1M", "WIBOR 3M", "WIBOR 6M", "PL CPI (YoY)",
+  ].includes(ind.name);
   const valueStr  = isPercent
     ? `${Number(ind.value).toFixed(2)}%`
     : Number(ind.value).toFixed(4);
@@ -94,8 +97,10 @@ export default async function MacroPage() {
   const allIndicators = Array.from(latestMap.values());
 
   // Split by source
-  const nbpIndicators  = allIndicators.filter(i => i.source === "NBP");
-  const fredIndicators = allIndicators.filter(i => i.source === "FRED");
+  const nbpIndicators   = allIndicators.filter(i => i.source === "NBP");
+  const wiborIndicators = allIndicators.filter(i => i.source === "Stooq");
+  const cpiIndicators   = allIndicators.filter(i => i.source === "GUS BDL");
+  const fredIndicators  = allIndicators.filter(i => i.source === "FRED");
 
   const lastFetch = allIndicators.length > 0
     ? new Date(allIndicators[0].fetched_at).toLocaleString("pl-PL", { timeZone: "Europe/Warsaw" })
@@ -109,7 +114,8 @@ export default async function MacroPage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-white">Wskaźniki Makro</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Źródło: NBP API{fredIndicators.length > 0 ? " + FRED API" : ""}
+            Źródło: NBP API
+            {" "}· Stooq WIBOR · GUS BDL CPI{fredIndicators.length > 0 ? " · FRED API" : ""}
             {" "}· aktualizacja co 6h
             {lastFetch && <span className="ml-2">· ostatnia: {lastFetch}</span>}
           </p>
@@ -133,6 +139,34 @@ export default async function MacroPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {nbpIndicators.map((ind) => (
                     <IndicatorCard key={ind.name} ind={ind} invertColor={true} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* WIBOR rates */}
+            {wiborIndicators.length > 0 && (
+              <section className="mb-8">
+                <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+                  Stopy WIBOR (Stooq)
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {wiborIndicators.map((ind) => (
+                    <IndicatorCard key={ind.name} ind={ind} invertColor={false} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* PL CPI */}
+            {cpiIndicators.length > 0 && (
+              <section className="mb-8">
+                <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+                  Inflacja PL (GUS BDL)
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {cpiIndicators.map((ind) => (
+                    <IndicatorCard key={ind.name} ind={ind} invertColor={false} />
                   ))}
                 </div>
               </section>
