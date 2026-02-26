@@ -54,22 +54,76 @@ interface EventClassification {
 }
 
 /**
- * Detect event type and impact score from title.
+ * Classify event type and impact score from title using 15 granular types.
  * Keywords are checked case-insensitively.
+ *
+ * Event types:
+ *   earnings_quarterly, earnings_annual, dividend_announcement,
+ *   dividend_payment, merger_acquisition, share_buyback, capital_increase,
+ *   management_change, regulatory, contract_major, contract_other,
+ *   insider_transaction, agm, guidance, other
  */
 function classifyTitle(title: string): EventClassification {
   const t = title.toLowerCase();
 
-  if (/wyniki|raport|earnings|q[1-4]|roczn|kwartaln/.test(t)) {
-    return { event_type: "earnings", impact_score: 8 };
+  // ── Earnings — annual (roczn, annual, full-year, 12M) ─────────────────────
+  if (/wyniki roczn|raport roczn|annual results|full.year|12 miesię|q4.*roczn/.test(t)) {
+    return { event_type: "earnings_annual", impact_score: 9 };
   }
-  if (/dywidend|dividend/.test(t)) {
-    return { event_type: "dividend", impact_score: 7 };
+  // ── Earnings — quarterly (q1/q2/q3, I/II/III kwartał) ────────────────────
+  if (/wyniki|raport|earnings|q[1-4]\b|i+\s*kwart|kwartaln|półroczn|h[12]\b/.test(t)) {
+    return { event_type: "earnings_quarterly", impact_score: 8 };
   }
-  if (/regulat|knf|uokik|nadzór|sankcj|kara/.test(t)) {
-    return { event_type: "regulatory", impact_score: 6 };
+  // ── Mergers & Acquisitions ────────────────────────────────────────────────
+  if (/przejęci|akwizycj|fuzj|merger|acqui|nabyci.*spółk|tender offer/.test(t)) {
+    return { event_type: "merger_acquisition", impact_score: 9 };
   }
-  return { event_type: "other", impact_score: 4 };
+  // ── Share buyback ─────────────────────────────────────────────────────────
+  if (/skup.*akcj|buyback|buy.back|nabyci.*własn/.test(t)) {
+    return { event_type: "share_buyback", impact_score: 7 };
+  }
+  // ── Capital increase / issue ──────────────────────────────────────────────
+  if (/emisj.*akcj|podwyższeni.*kapitał|capital increase|nowa emisj|issue of shares/.test(t)) {
+    return { event_type: "capital_increase", impact_score: 8 };
+  }
+  // ── Dividend announcement ─────────────────────────────────────────────────
+  if (/dywidend|dividend|rekomendacja.*wypłat/.test(t)) {
+    return { event_type: "dividend_announcement", impact_score: 7 };
+  }
+  // ── Dividend payment / ex-date ────────────────────────────────────────────
+  if (/wypłat.*dywidend|dzień dywidend|ex.date|dzień nabyci.*prawa do dywidend/.test(t)) {
+    return { event_type: "dividend_payment", impact_score: 6 };
+  }
+  // ── Management change ─────────────────────────────────────────────────────
+  if (/zarząd|prezes|ceo|cfo|coo|rezygnacj.*member|powołan|odwołan|management change/.test(t)) {
+    return { event_type: "management_change", impact_score: 6 };
+  }
+  // ── Regulatory ────────────────────────────────────────────────────────────
+  if (/regulat|knf|uokik|nadzór|sankcj|kara|urząd|decyzj.*organu|license/.test(t)) {
+    return { event_type: "regulatory", impact_score: 7 };
+  }
+  // ── Major contract ────────────────────────────────────────────────────────
+  if (/umow[aę].*znacząc|kontrakt.*znacząc|contract.*significant|material contract|istotna umow/.test(t)) {
+    return { event_type: "contract_major", impact_score: 7 };
+  }
+  // ── Contract (other) ──────────────────────────────────────────────────────
+  if (/umow[aę]|kontrakt|contract|zamówieni|order/.test(t)) {
+    return { event_type: "contract_other", impact_score: 5 };
+  }
+  // ── Insider transaction ───────────────────────────────────────────────────
+  if (/transakcj.*osob|insider|nabyci.*akcj.*przez|sprzedaż.*akcj.*przez|art\.19/.test(t)) {
+    return { event_type: "insider_transaction", impact_score: 5 };
+  }
+  // ── AGM / General Meeting ─────────────────────────────────────────────────
+  if (/walne|zgromadzeni|agm|general meeting/.test(t)) {
+    return { event_type: "agm", impact_score: 4 };
+  }
+  // ── Guidance / Forecast update ────────────────────────────────────────────
+  if (/prognoz|forecast|guidance|outlook|cel.*finansow/.test(t)) {
+    return { event_type: "guidance", impact_score: 6 };
+  }
+
+  return { event_type: "other", impact_score: 3 };
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────

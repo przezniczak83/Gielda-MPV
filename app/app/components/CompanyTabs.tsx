@@ -135,7 +135,24 @@ function ImpactBadge({ score }: { score: number | null }) {
 
 function EventTypeBadge({ type }: { type: string | null }) {
   const labels: Record<string, string> = {
-    earnings: "Wyniki", dividend: "Dywidenda", regulatory: "Regulacje", other: "Inne",
+    earnings_quarterly:   "Wyniki Q",
+    earnings_annual:      "Wyniki Roczne",
+    dividend_announcement:"Dywidenda",
+    dividend_payment:     "Wypłata Dywidendy",
+    merger_acquisition:   "M&A",
+    share_buyback:        "Skup akcji",
+    capital_increase:     "Emisja",
+    management_change:    "Zarząd",
+    regulatory:           "Regulacje",
+    contract_major:       "Kontrakt",
+    contract_other:       "Umowa",
+    insider_transaction:  "Insider",
+    agm:                  "WZA",
+    guidance:             "Prognoza",
+    // legacy types
+    earnings:             "Wyniki",
+    dividend:             "Dywidenda",
+    other:                "Inne",
   };
   return (
     <span className="inline-block text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 font-medium whitespace-nowrap">
