@@ -867,3 +867,40 @@ historyMessages.push({ role: "user", content: userQuestion });
 **Save:** POST user message before API call; POST assistant response after streaming completes.
 **Clear:** DELETE `/api/chat-history?ticker=X` to reset conversation.
 
+---
+
+## BRK Ticker Rename — FK Deadlock via peer_group_members (2026-02-26)
+
+**Problem:** `UPDATE companies SET ticker = 'BRK.B' WHERE ticker = 'BRK'` fails with:
+`ERROR: update or delete on table "companies" violates foreign key constraint "peer_group_members_ticker_fkey"`
+
+Even with `NOT EXISTS` guards on `company_events` and `price_history`, `peer_group_members`
+(migration 0036) still holds a reference. The FK was created without `ON UPDATE CASCADE`.
+
+**Fix used:** Skip ticker rename, only update name:
+```sql
+UPDATE companies SET name = 'Berkshire Hathaway B' WHERE ticker = 'BRK' AND market = 'USA';
+```
+
+**Full rename pattern** (if needed in future): drop FK on ALL child tables, cascade-update, re-add.
+Tables with FK on companies.ticker: company_events, price_history, company_financials,
+analyst_forecasts, company_kpis, company_snapshot, company_sentiment, alert_rules,
+peer_group_members, calendar_events, dividends, sector_kpis, chat_history, price_correlations.
+
+---
+
+## Migration Bug Pattern: DELETE + UPDATE Conflict (2026-02-26)
+
+**Problem:** A migration that DELETEs a ticker in KROK 1, then tries to UPDATE it in KROK 2,
+silently leaves the ticker absent from the DB. The UPDATE runs with no error but affects 0 rows.
+
+**Example:** AMB, CAR, ATG, SPL were in the DELETE list but had UPDATE statements in KROK 2.
+After DELETE, the UPDATEs did nothing → these companies would disappear entirely.
+
+**Fix:** Check every ticker that appears in an UPDATE against the DELETE list.
+If it should be kept (just corrected), remove it from DELETE.
+If it should be replaced, use DELETE + INSERT with ON CONFLICT instead of UPDATE.
+
+**Rule:** Before applying any migration that has both DELETE and UPDATE sections,
+grep for overlapping tickers between the two sets.
+
