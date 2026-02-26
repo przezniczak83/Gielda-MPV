@@ -115,8 +115,16 @@ const CAL_EMOJI: Record<string, string> = {
 
 export default async function DashboardPage() {
   const oneDayAgo    = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const twelveHAgo   = new Date(Date.now() - 12 * 3600 * 1000).toISOString();
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
   const todayStart   = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+
+  // Morning brief: only relevant 6:00–12:00 Warsaw time
+  const warsawHour = parseInt(
+    new Date().toLocaleString("en-US", { hour: "numeric", hour12: false, timeZone: "Europe/Warsaw" }),
+    10,
+  );
+  const showMorningBrief = warsawHour >= 6 && warsawHour < 12;
 
   const [
     { count: companyCount },
@@ -128,6 +136,9 @@ export default async function DashboardPage() {
     { data: alertedEvents },
     { data: recommendations },
     { data: upcomingEvents },
+    { count: morningAlertsCount },
+    { count: morningCalendarCount },
+    { count: morningRecsCount },
   ] = await Promise.all([
     supabase.from("companies").select("*", { count: "exact", head: true }),
     supabase.from("company_events").select("*", { count: "exact", head: true }).gt("created_at", oneDayAgo),
@@ -159,6 +170,14 @@ export default async function DashboardPage() {
       .gte("event_date", todayStart)
       .order("event_date", { ascending: true })
       .limit(5),
+    // Morning brief counts
+    supabase.from("company_events").select("*", { count: "exact", head: true })
+      .gte("published_at", twelveHAgo).gte("impact_score", 6),
+    supabase.from("calendar_events").select("*", { count: "exact", head: true })
+      .gte("event_date", todayStart)
+      .lte("event_date", new Date(Date.now() + 48 * 3600 * 1000).toISOString()),
+    supabase.from("analyst_forecasts").select("*", { count: "exact", head: true })
+      .gte("created_at", oneDayAgo),
   ]);
 
   // Aggregate top companies
@@ -188,6 +207,52 @@ export default async function DashboardPage() {
           <h1 className="text-2xl font-bold text-white">Dashboard</h1>
           <p className="text-gray-500 text-sm mt-1">Aktualizacja: {formatDateTime(lastUpdated)}</p>
         </div>
+
+        {/* ── Morning Brief widget (6:00–12:00 only) ───────────────── */}
+        {showMorningBrief && (
+          <div className="mb-6 rounded-xl border border-amber-800/40 bg-amber-900/10 px-5 py-4">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-base">🌅</span>
+                  <span className="text-sm font-semibold text-amber-300">Morning Brief</span>
+                  <span className="text-xs text-amber-700">
+                    {new Date().toLocaleDateString("pl-PL", {
+                      weekday: "long", day: "numeric", month: "long",
+                      timeZone: "Europe/Warsaw",
+                    })}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 flex-wrap text-sm">
+                  <span className="text-gray-300">
+                    <span className={(morningAlertsCount ?? 0) > 0 ? "text-red-400 font-bold" : "text-gray-500"}>
+                      ⚡ {morningAlertsCount ?? 0}
+                    </span>
+                    <span className="text-gray-600 text-xs ml-1">alertów z nocy</span>
+                  </span>
+                  <span className="text-gray-300">
+                    <span className={(morningCalendarCount ?? 0) > 0 ? "text-blue-400 font-bold" : "text-gray-500"}>
+                      📅 {morningCalendarCount ?? 0}
+                    </span>
+                    <span className="text-gray-600 text-xs ml-1">eventów dziś</span>
+                  </span>
+                  <span className="text-gray-300">
+                    <span className={(morningRecsCount ?? 0) > 0 ? "text-green-400 font-bold" : "text-gray-500"}>
+                      💼 {morningRecsCount ?? 0}
+                    </span>
+                    <span className="text-gray-600 text-xs ml-1">rekomendacji</span>
+                  </span>
+                </div>
+              </div>
+              <Link
+                href="/alerts"
+                className="text-xs px-3 py-1.5 rounded-md bg-amber-900/30 hover:bg-amber-900/50 border border-amber-700/40 text-amber-300 transition-colors whitespace-nowrap"
+              >
+                Zobacz szczegóły →
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* ── Stats bar ─────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
