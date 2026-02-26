@@ -1,11 +1,9 @@
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
+import TopMovers   from "./components/TopMovers";
+import TodayAlerts from "./components/TodayAlerts";
 
 export const revalidate = 300; // ISR: 5 minutes
-
-const TopMovers  = dynamic(() => import("./components/TopMovers"),  { ssr: false });
-const TodayAlerts = dynamic(() => import("./components/TodayAlerts"), { ssr: false });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

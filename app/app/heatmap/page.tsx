@@ -1,13 +1,8 @@
-import dynamic from "next/dynamic";
 import Link    from "next/link";
 import { createClient } from "@supabase/supabase-js";
+import CorrelationMatrix from "../components/CorrelationMatrix";
 
 export const revalidate = 3600; // ISR: 1 hour
-
-const CorrelationMatrix = dynamic(
-  () => import("../components/CorrelationMatrix"),
-  { ssr: false },
-);
 
 const DEFAULT_TICKERS = [
   "PKO","PKN","PZU","KGH","PEO","SPL","LPP","DNP","ALE","CDR",

@@ -4,11 +4,8 @@ import "./globals.css";
 import Nav          from "./components/Nav";
 import GlobalSearch from "./components/GlobalSearch";
 import LeftSidebar  from "./components/LeftSidebar";
-import dynamic      from "next/dynamic";
-
-const BackToTop = dynamic(() => import("./components/BackToTop"), { ssr: false });
-
-const TickerTape = dynamic(() => import("./components/TickerTape"), { ssr: false });
+import TickerTape   from "./components/TickerTape";
+import BackToTop    from "./components/BackToTop";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
