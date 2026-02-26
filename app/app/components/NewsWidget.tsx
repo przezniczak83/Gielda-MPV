@@ -196,7 +196,7 @@ export default function NewsWidget() {
                       key={i}
                       className="text-[9px] text-gray-400 bg-gray-800/80 border border-gray-700 px-1.5 py-0.5 rounded leading-tight"
                     >
-                      {fact.length > 60 ? fact.slice(0, 57) + "…" : fact}
+                      {typeof fact === "string" ? (fact.length > 60 ? fact.slice(0, 57) + "…" : fact) : (fact as any).description ?? (fact as any).type ?? ""}
                     </span>
                   ))}
                 </div>

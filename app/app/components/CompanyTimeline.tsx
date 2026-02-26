@@ -228,7 +228,7 @@ export default function CompanyTimeline({ ticker }: { ticker: string }) {
                             key={i}
                             className="text-[9px] text-gray-500 bg-gray-800/80 border border-gray-700/50 px-1.5 py-0.5 rounded"
                           >
-                            {fact.length > 55 ? fact.slice(0, 52) + "…" : fact}
+                            {typeof fact === "string" ? (fact.length > 55 ? fact.slice(0, 52) + "…" : fact) : (fact as any).description ?? (fact as any).type ?? ""}
                           </span>
                         ))}
                       </div>
