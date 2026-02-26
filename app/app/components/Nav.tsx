@@ -12,7 +12,6 @@ const links = [
   { href: "/watchlists", label: "Watchlisty"    },
   { href: "/calendar",   label: "Kalendarz"     },
   { href: "/alerts",        label: "Alerty"        },
-  { href: "/paper-trading", label: "Paper Trade"   },
   { href: "/upload",        label: "Wgraj raport"  },
   { href: "/status",        label: "Status"        },
   { href: "/settings",      label: "⚙ Ustawienia" },
