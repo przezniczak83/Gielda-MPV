@@ -44,11 +44,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const rows = data ?? [];
+  const rows = (data ?? []) as Array<Record<string, number | null>>;
 
   // Aggregate stats over the window
   const sentiments = rows.flatMap(r =>
-    r.avg_sentiment !== null ? [r.avg_sentiment as number] : [],
+    r.avg_sentiment !== null ? [r.avg_sentiment] : [],
   );
   const avgSentiment =
     sentiments.length > 0
