@@ -1,18 +1,18 @@
 // supabase/functions/process-news/index.ts
-// AI analysis pipeline for news_items — v2.
+// AI analysis pipeline for news_items — v3.
 //
-// Changes from v1:
-//   - Loads ticker_aliases for better heuristic pre-extraction
-//   - Extended AI prompt: key_facts, topics, is_breaking, impact_assessment
-//   - Updates companies.last_news_at for matched tickers
-//   - Writes ingestion_log after each batch
+// Changes from v2:
+//   - Batch 100 items/run (was 20)
+//   - Concurrent processing: CONCURRENCY=5 chunks × 200ms gap (safe for GPT-4o-mini 500 RPM)
+//   - Trigger mode: body.trigger=true uses limit=10 (fast path for pg_net trigger)
+//   - processItem() extracted for reuse in parallel map
 //
 // Model: GPT-4o-mini (OPENAI_API_KEY)
-// Batch: 20 items/run, 200ms between OpenAI calls
+// Batch: 100 items/run (trigger mode: 10), CONCURRENCY=5
 //
 // Deploy: supabase functions deploy process-news --project-ref pftgmorsthoezhmojjpg
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,8 +47,10 @@ interface AIAnalysis {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BATCH_SIZE    = 20;
-const SLEEP_BETWEEN = 200; // ms between OpenAI calls
+const BATCH_SIZE    = 100;  // cron batch
+const TRIGGER_BATCH = 10;   // trigger (fast path)
+const CONCURRENCY   = 5;    // parallel OpenAI calls per chunk
+const SLEEP_BETWEEN = 200;  // ms between chunks (≈25 req/s max, well under 500 RPM)
 
 // Sources with paywalled content — skip AI if summary is too short
 const PAYWALL_SOURCES = ["rp", "parkiet", "pb"];
@@ -88,10 +90,10 @@ function extractTickersHeuristic(
 // ─── AI Analysis ──────────────────────────────────────────────────────────────
 
 async function analyzeItem(
-  item:               NewsItem,
-  preExtracted:       string[],
-  allTickers:         string[],
-  openaiKey:          string,
+  item:         NewsItem,
+  preExtracted: string[],
+  allTickers:   string[],
+  openaiKey:    string,
 ): Promise<AIAnalysis | null> {
   const systemPrompt =
     `Jesteś analitykiem rynku kapitałowego GPW. ` +
@@ -196,9 +198,101 @@ tickers: [] jeśli makro/ogólne, max 5 tickerów`;
   };
 }
 
+// ─── Process a single item (extracted for parallel map) ───────────────────────
+
+interface ProcessResult {
+  ok:      boolean;
+  id:      number;
+  error?:  string;
+}
+
+async function processItem(
+  item:       NewsItem,
+  supabase:   SupabaseClient,
+  aliasMap:   Map<string, string>,
+  allTickers: string[],
+  openaiKey:  string,
+): Promise<ProcessResult> {
+  // Heuristic pre-extraction using alias map
+  const preExtracted = extractTickersHeuristic(item.title, item.summary, aliasMap);
+
+  // Paywall filter — skip AI for paywalled sources with no body content
+  if (PAYWALL_SOURCES.includes(item.source) && (!item.summary || item.summary.length < 100)) {
+    const paywallUpdate: Record<string, unknown> = {
+      ai_processed: true,
+      impact_score: 3,
+      category:     "other",
+      ai_summary:   item.title.slice(0, 300),
+    };
+    if (preExtracted.length > 0) paywallUpdate.tickers = preExtracted;
+    await supabase.from("news_items").update(paywallUpdate).eq("id", item.id);
+    console.log(`[process-news] item ${item.id}: paywall skip (${item.source})`);
+    return { ok: true, id: item.id };
+  }
+
+  let analysis: AIAnalysis | null = null;
+  try {
+    analysis = await analyzeItem(item, preExtracted, allTickers, openaiKey);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[process-news] item ${item.id} AI error: ${msg}`);
+  }
+
+  // Merge heuristic tickers into AI result
+  const finalTickers = analysis
+    ? [...new Set([...analysis.tickers, ...preExtracted])].slice(0, 10)
+    : preExtracted;
+
+  // Update news_items (always mark processed to prevent infinite retry)
+  const update: Record<string, unknown> = { ai_processed: true };
+  if (analysis) {
+    update.tickers           = finalTickers;
+    update.sector            = analysis.sector;
+    update.sentiment         = analysis.sentiment;
+    update.impact_score      = analysis.impact_score;
+    update.category          = analysis.category;
+    update.ai_summary        = analysis.ai_summary;
+    update.key_facts         = analysis.key_facts;
+    update.topics            = analysis.topics;
+    update.is_breaking       = analysis.is_breaking;
+    update.impact_assessment = analysis.impact_assessment;
+  } else if (preExtracted.length > 0) {
+    update.tickers = preExtracted;
+  }
+
+  const { error: updateErr } = await supabase
+    .from("news_items")
+    .update(update)
+    .eq("id", item.id);
+
+  if (updateErr) {
+    console.error(`[process-news] item ${item.id} update error:`, updateErr.message);
+    return { ok: false, id: item.id, error: updateErr.message };
+  }
+
+  // Update companies.last_news_at for matched tickers
+  if (finalTickers.length > 0) {
+    const newsAt = item.published_at ?? new Date().toISOString();
+    for (const ticker of finalTickers) {
+      await supabase
+        .from("companies")
+        .update({ last_news_at: newsAt })
+        .eq("ticker", ticker)
+        .or(`last_news_at.is.null,last_news_at.lt.${newsAt}`);
+    }
+  }
+
+  if (analysis) {
+    const breaking = analysis.is_breaking ? " 🚨BREAKING" : "";
+    console.log(`[process-news] item ${item.id}: impact=${analysis.impact_score} tickers=${finalTickers.join(",") || "none"}${breaking} ✓`);
+  }
+
+  return { ok: !analysis ? false : true, id: item.id };
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
-Deno.serve(async (_req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   const startTime = Date.now();
   console.log("[process-news] Invoked at:", new Date().toISOString());
 
@@ -215,6 +309,20 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     { auth: { persistSession: false } },
   );
+
+  // Parse trigger mode from request body
+  let isTriggered = false;
+  try {
+    if (req.method === "POST") {
+      const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+      isTriggered = body.trigger === true;
+    }
+  } catch { /* ignore */ }
+
+  const limit = isTriggered ? TRIGGER_BATCH : BATCH_SIZE;
+  if (isTriggered) {
+    console.log(`[process-news] Trigger mode — limit=${limit}`);
+  }
 
   // ── Load ticker_aliases for heuristic matching ────────────────────────────
   const { data: aliasRows } = await supabase
@@ -236,7 +344,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     .select("id, title, summary, source, url, published_at")
     .eq("ai_processed", false)
     .order("published_at", { ascending: false })
-    .limit(BATCH_SIZE);
+    .limit(limit);
 
   if (fetchErr) {
     return new Response(
@@ -255,90 +363,32 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     );
   }
 
-  // ── Process each item ─────────────────────────────────────────────────────
+  // ── Process in parallel chunks ────────────────────────────────────────────
   let processed = 0;
   let failed    = 0;
 
-  for (let i = 0; i < batch.length; i++) {
-    const item = batch[i];
-    if (i > 0) await sleep(SLEEP_BETWEEN);
+  const chunks: NewsItem[][] = [];
+  for (let i = 0; i < batch.length; i += CONCURRENCY) {
+    chunks.push(batch.slice(i, i + CONCURRENCY));
+  }
 
-    // Heuristic pre-extraction using alias map
-    const preExtracted = extractTickersHeuristic(item.title, item.summary, aliasMap);
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const chunk = chunks[ci];
+    if (ci > 0) await sleep(SLEEP_BETWEEN);
 
-    // Paywall filter — skip AI for paywalled sources with no body content
-    if (PAYWALL_SOURCES.includes(item.source) && (!item.summary || item.summary.length < 100)) {
-      const paywallUpdate: Record<string, unknown> = {
-        ai_processed: true,
-        impact_score: 3,
-        category:     "other",
-        ai_summary:   item.title.slice(0, 300),
-      };
-      if (preExtracted.length > 0) paywallUpdate.tickers = preExtracted;
-      await supabase.from("news_items").update(paywallUpdate).eq("id", item.id);
-      processed++;
-      console.log(`[process-news] item ${item.id}: paywall skip (${item.source})`);
-      continue;
-    }
+    const results = await Promise.allSettled(
+      chunk.map(item => processItem(item, supabase, aliasMap, allTickers, openaiKey)),
+    );
 
-    let analysis: AIAnalysis | null = null;
-    try {
-      analysis = await analyzeItem(item, preExtracted, allTickers, openaiKey);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[process-news] item ${item.id} AI error: ${msg}`);
-      failed++;
-    }
-
-    // Merge heuristic tickers into AI result
-    const finalTickers = analysis
-      ? [...new Set([...analysis.tickers, ...preExtracted])].slice(0, 10)
-      : preExtracted;
-
-    // Update news_items (always mark processed to prevent infinite retry)
-    const update: Record<string, unknown> = { ai_processed: true };
-    if (analysis) {
-      update.tickers           = finalTickers;
-      update.sector            = analysis.sector;
-      update.sentiment         = analysis.sentiment;
-      update.impact_score      = analysis.impact_score;
-      update.category          = analysis.category;
-      update.ai_summary        = analysis.ai_summary;
-      update.key_facts         = analysis.key_facts;
-      update.topics            = analysis.topics;
-      update.is_breaking       = analysis.is_breaking;
-      update.impact_assessment = analysis.impact_assessment;
-    } else if (preExtracted.length > 0) {
-      update.tickers = preExtracted;
-    }
-
-    const { error: updateErr } = await supabase
-      .from("news_items")
-      .update(update)
-      .eq("id", item.id);
-
-    if (updateErr) {
-      console.error(`[process-news] item ${item.id} update error:`, updateErr.message);
-      failed++;
-      continue;
-    }
-
-    // Update companies.last_news_at for matched tickers
-    if (finalTickers.length > 0) {
-      const newsAt = item.published_at ?? new Date().toISOString();
-      for (const ticker of finalTickers) {
-        await supabase
-          .from("companies")
-          .update({ last_news_at: newsAt })
-          .eq("ticker", ticker)
-          .or(`last_news_at.is.null,last_news_at.lt.${newsAt}`);
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value.ok) {
+        processed++;
+      } else {
+        failed++;
+        if (result.status === "rejected") {
+          console.error("[process-news] Chunk item failed:", result.reason);
+        }
       }
-    }
-
-    if (analysis) {
-      const breaking = analysis.is_breaking ? " 🚨BREAKING" : "";
-      console.log(`[process-news] item ${item.id}: impact=${analysis.impact_score} tickers=${finalTickers.join(",") || "none"}${breaking} ✓`);
-      processed++;
     }
   }
 
@@ -353,7 +403,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     duration_ms:      Date.now() - startTime,
   });
 
-  console.log(`[process-news] Done: processed=${processed}, failed=${failed}, ms=${Date.now() - startTime}`);
+  console.log(`[process-news] Done: processed=${processed}, failed=${failed}, total=${batch.length}, ms=${Date.now() - startTime}`);
 
   return new Response(
     JSON.stringify({
@@ -361,6 +411,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       processed,
       failed,
       total:     batch.length,
+      triggered: isTriggered,
       ts:        new Date().toISOString(),
     }),
     { status: 200, headers: { "Content-Type": "application/json" } },
