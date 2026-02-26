@@ -15,6 +15,7 @@ const links = [
   { href: "/paper-trading", label: "Paper Trade"   },
   { href: "/upload",        label: "Wgraj raport"  },
   { href: "/status",        label: "Status"        },
+  { href: "/settings",      label: "⚙ Ustawienia" },
 ];
 
 interface NavStats {
