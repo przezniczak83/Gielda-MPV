@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+interface KeyFact {
+  type:        string;
+  description: string;
+  detail?:     string;
+  impact?:     "positive" | "negative" | "neutral";
+}
+
 interface NewsItem {
   id:           number;
   url:          string;
@@ -14,7 +21,12 @@ interface NewsItem {
   category:     string | null;
   ai_summary:   string | null;
   is_breaking:  boolean | null;
-  key_facts:    string[] | null;
+  key_facts:    KeyFact[] | null;
+}
+
+function factText(fact: KeyFact, maxLen = 55): string {
+  const text = fact.description || fact.type || "";
+  return text.length > maxLen ? text.slice(0, maxLen - 3) + "…" : text;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -228,7 +240,7 @@ export default function CompanyTimeline({ ticker }: { ticker: string }) {
                             key={i}
                             className="text-[9px] text-gray-500 bg-gray-800/80 border border-gray-700/50 px-1.5 py-0.5 rounded"
                           >
-                            {typeof fact === "string" ? (fact.length > 55 ? fact.slice(0, 52) + "…" : fact) : (fact as any).description ?? (fact as any).type ?? ""}
+                            {factText(fact)}
                           </span>
                         ))}
                       </div>

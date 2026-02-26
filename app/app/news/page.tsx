@@ -3,6 +3,13 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 
+interface KeyFact {
+  type:        string;
+  description: string;
+  detail?:     string;
+  impact?:     "positive" | "negative" | "neutral";
+}
+
 interface NewsItem {
   id:           number;
   url:          string;
@@ -17,7 +24,12 @@ interface NewsItem {
   category:     string | null;
   ai_summary:   string | null;
   is_breaking:  boolean | null;
-  key_facts:    string[] | null;
+  key_facts:    KeyFact[] | null;
+}
+
+function factText(fact: KeyFact, maxLen = 70): string {
+  const text = fact.description || fact.type || "";
+  return text.length > maxLen ? text.slice(0, maxLen - 3) + "…" : text;
 }
 
 interface StatsData {
@@ -396,7 +408,7 @@ export default function NewsPage() {
                                   key={i}
                                   className="text-[9px] text-gray-500 bg-gray-800/80 border border-gray-700/50 px-1.5 py-0.5 rounded"
                                 >
-                                  {fact.length > 70 ? fact.slice(0, 67) + "…" : fact}
+                                  {factText(fact)}
                                 </span>
                               ))}
                             </div>

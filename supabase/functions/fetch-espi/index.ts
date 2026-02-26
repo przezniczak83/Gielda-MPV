@@ -237,30 +237,44 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   // Skips stub records (they have no real URL)
   if (sourceUsed !== "stub") {
     let newsInserted = 0;
+    let newsSkipped  = 0;
+    let newsFailed   = 0;
+
+    console.log(`[fetch-espi] Bridge: processing ${records.length} records`);
+
     for (const record of records) {
       const espiUrl = record.url ?? `espi-${record.ticker}-${record.published_at ?? Date.now()}`;
       const hash    = await hashUrl(espiUrl);
 
-      const { error: newsErr } = await supabase
+      const { data: upsertData, error: newsErr } = await supabase
         .from("news_items")
         .upsert({
-          url_hash:     hash,
-          url:          record.url ?? espiUrl,
-          source_url:   record.url ?? null,
-          title:        record.title,
-          summary:      null,
-          source:       "espi",
-          published_at: record.published_at,
-          tickers:      [record.ticker],
-          category:     "regulatory",
-          impact_score: 8,      // ESPI always high significance
-          ai_processed: false,
+          url_hash:      hash,
+          url:           record.url ?? espiUrl,
+          source_url:    record.url ?? null,
+          title:         record.title,
+          summary:       null,
+          source:        "espi",
+          published_at:  record.published_at,
+          tickers:       [record.ticker],
+          category:      "regulatory",
+          impact_score:  8,       // ESPI always high significance
+          ai_processed:  false,
           telegram_sent: false,
-        }, { onConflict: "url_hash", ignoreDuplicates: true });
+        }, { onConflict: "url_hash" })  // UPDATE on conflict (not ignore)
+        .select("id");
 
-      if (!newsErr) newsInserted++;
+      if (newsErr) {
+        console.error(`[fetch-espi] Bridge error for ${record.ticker}: ${newsErr.message}`, newsErr.details ?? "");
+        newsFailed++;
+      } else if (upsertData && upsertData.length > 0) {
+        newsInserted++;
+      } else {
+        newsSkipped++; // conflict — record already existed, updated in-place
+      }
     }
-    console.log(`[fetch-espi] Bridge: ${newsInserted}/${records.length} inserted into news_items`);
+
+    console.log(`[fetch-espi] Bridge: +${newsInserted} inserted, ${newsSkipped} updated, ${newsFailed} failed`);
   }
 
   return new Response(

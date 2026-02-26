@@ -63,10 +63,11 @@ const NEWS_SOURCES: Array<{ name: string; urls: string[] }> = [
   },
 
   // ── BANKIER ─────────────────────────────────────────
+  // NOTE: bankier/espi.xml is intentionally EXCLUDED here — fetch-espi owns it
+  // and writes to both raw_ingest and news_items with source='espi'.
   {
     name: "bankier",
     urls: [
-      "https://www.bankier.pl/rss/espi.xml",       // dedykowany ESPI
       "https://www.bankier.pl/rss/gielda.xml",     // artykuły giełdowe
       "https://www.bankier.pl/rss/wiadomosci.xml", // wszystkie newsy
       "https://www.bankier.pl/rss/firma.xml",      // spółki

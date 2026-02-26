@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+interface KeyFact {
+  type:        string;
+  description: string;
+  detail?:     string;
+  impact?:     "positive" | "negative" | "neutral";
+}
+
 interface NewsItem {
   id:           number;
   url:          string;
@@ -15,7 +22,12 @@ interface NewsItem {
   category:     string | null;
   ai_summary:   string | null;
   is_breaking:  boolean | null;
-  key_facts:    string[] | null;
+  key_facts:    KeyFact[] | null;
+}
+
+function factText(fact: KeyFact): string {
+  const text = fact.description || fact.type || "";
+  return text.length > 60 ? text.slice(0, 57) + "…" : text;
 }
 
 type Filter = "all" | "high" | "ticker";
@@ -196,7 +208,7 @@ export default function NewsWidget() {
                       key={i}
                       className="text-[9px] text-gray-400 bg-gray-800/80 border border-gray-700 px-1.5 py-0.5 rounded leading-tight"
                     >
-                      {typeof fact === "string" ? (fact.length > 60 ? fact.slice(0, 57) + "…" : fact) : (fact as any).description ?? (fact as any).type ?? ""}
+                      {factText(fact)}
                     </span>
                   ))}
                 </div>
