@@ -4,6 +4,7 @@
 // Fetches data from /api/company/[ticker] (snapshot-first, cached).
 
 import { useEffect, useState } from "react";
+import { LiveTimestamp }       from "./LiveTimestamp";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -178,6 +179,7 @@ export default function TerminalOverview({ ticker }: { ticker: string }) {
                 </span>
                 <span className="text-gray-600">Vol: {formatVol(price.volume)}</span>
                 <span className="px-1.5 py-0.5 rounded bg-green-900/30 text-green-500 text-[10px]">LIVE</span>
+                <LiveTimestamp date={price.date} prefix="kurs" />
               </>
             ) : (
               <span className="text-gray-500">Brak danych cenowych</span>

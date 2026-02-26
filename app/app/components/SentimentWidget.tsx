@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { LiveTimestamp }       from "./LiveTimestamp";
 
 interface SentimentData {
   ticker:      string;
@@ -140,9 +141,10 @@ export default function SentimentWidget({ ticker }: Props) {
           {data.summary && (
             <p className="text-sm text-gray-300 mt-3 leading-relaxed">{data.summary}</p>
           )}
-          {analyzedDate && (
-            <p className="text-xs text-gray-600 mt-2">Ostatnia analiza: {analyzedDate} · Claude Haiku</p>
-          )}
+          <p className="text-xs text-gray-600 mt-2 flex items-center gap-1">
+            Claude Haiku
+            <LiveTimestamp date={data?.analyzed_at} prefix="sentiment" />
+          </p>
         </>
       ) : (
         <p className="text-sm text-gray-500">

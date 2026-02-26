@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LiveTimestamp }       from "./LiveTimestamp";
 
 interface ScenarioData {
   scenario:           string;
@@ -103,10 +104,8 @@ export default function ForecastWidget({ ticker }: { ticker: string }) {
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
             Prognoza AI (3 scenariusze)
+            <LiveTimestamp date={genAt} prefix="prognoza" />
           </h3>
-          {genAtStr && (
-            <div className="text-xs text-gray-600 mt-0.5">Wygenerowano: {genAtStr}</div>
-          )}
         </div>
         <button
           onClick={handleGenerate}

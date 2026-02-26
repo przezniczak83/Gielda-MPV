@@ -5,6 +5,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from "recharts";
+import { LiveTimestamp } from "./LiveTimestamp";
 
 interface PricePoint {
   date:   string;
@@ -74,8 +75,24 @@ export default function PriceChart({ ticker }: { ticker: string }) {
   const minPrice = Math.min(...prices) * 0.995;
   const maxPrice = Math.max(...prices) * 1.005;
 
+  const lastPoint = data[data.length - 1];
+  const isLive    = lastPoint
+    ? (Date.now() - new Date(lastPoint.date).getTime()) < 48 * 3600_000
+    : false;
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-4 pt-4 pb-2">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          {isLive && (
+            <span className="flex items-center gap-1 text-xs text-green-400 font-mono">
+              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              LIVE
+            </span>
+          )}
+          <LiveTimestamp date={lastPoint?.date} prefix="ostatnia cena" staleAfter={86_400_000} />
+        </div>
+      </div>
       <ResponsiveContainer width="100%" height={180}>
         <LineChart data={displayData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />

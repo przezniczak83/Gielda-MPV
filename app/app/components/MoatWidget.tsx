@@ -5,6 +5,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip,
 } from "recharts";
+import { LiveTimestamp } from "./LiveTimestamp";
 
 // Sectors eligible for MOAT display
 const TECH_SECTORS = new Set([
@@ -33,8 +34,9 @@ interface MoatMetadata {
 }
 
 interface KpiRow {
-  value:    number | null;
-  metadata: MoatMetadata | null;
+  value:         number | null;
+  metadata:      MoatMetadata | null;
+  calculated_at: string | null;
 }
 
 interface ApiResponse {
@@ -124,6 +126,7 @@ export default function MoatWidget({ ticker, sector }: { ticker: string; sector?
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
           MOAT-7 Analysis
+          <LiveTimestamp date={kpi?.calculated_at} prefix="analiza" />
         </h3>
         <div className="flex items-center gap-3">
           <span className="text-lg font-bold text-white tabular-nums">

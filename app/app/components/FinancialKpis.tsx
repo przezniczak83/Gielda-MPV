@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { LiveTimestamp }       from "./LiveTimestamp";
 
 interface FinancialRow {
   period:     string;
@@ -140,6 +141,7 @@ export default function FinancialKpis({ ticker }: { ticker: string }) {
             <div className="flex items-baseline justify-between mb-3">
               <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
                 Dane finansowe
+                <LiveTimestamp date={healthData?.calculated_at} prefix="dane" />
               </h2>
               <span className="text-xs text-gray-600">{latest.period}</span>
             </div>

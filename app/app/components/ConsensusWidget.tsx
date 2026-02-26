@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LiveTimestamp }       from "./LiveTimestamp";
 
 interface ConsensusRow {
   institution:    string | null;
@@ -93,6 +94,7 @@ export default function ConsensusWidget({ ticker }: { ticker: string }) {
     <div className="space-y-4">
       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
         Konsensus analityków
+        <LiveTimestamp date={last_5[0]?.published_at} prefix="ostatnia rekomendacja" />
       </h3>
 
       {/* Sentiment + PT summary */}
