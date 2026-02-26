@@ -889,6 +889,50 @@ peer_group_members, calendar_events, dividends, sector_kpis, chat_history, price
 
 ---
 
+## Safe Company Deletion Pattern — All FK Children (2026-02-26)
+
+**Problem:** `DELETE FROM companies WHERE ticker = 'X'` fails if ANY child table has a
+non-CASCADE FK. Even after fixing one table (e.g. `calendar_events`), another might block.
+
+**Complete delete order for companies table:**
+```sql
+DO $$
+DECLARE bad_tickers text[] := ARRAY['TICK1', 'TICK2'];
+BEGIN
+  -- Non-CASCADE FKs (must delete explicitly):
+  DELETE FROM peer_group_members      WHERE ticker = ANY(bad_tickers);
+  DELETE FROM company_events          WHERE ticker = ANY(bad_tickers);
+  DELETE FROM calendar_events         WHERE ticker = ANY(bad_tickers);
+  DELETE FROM watchlist_items         WHERE ticker = ANY(bad_tickers);
+  DELETE FROM institutional_ownership WHERE ticker = ANY(bad_tickers);
+  DELETE FROM company_kpis            WHERE ticker = ANY(bad_tickers);
+  DELETE FROM company_snapshot        WHERE ticker = ANY(bad_tickers);
+
+  -- Optional tables (guard against missing):
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'portfolio_positions') THEN
+    EXECUTE 'DELETE FROM portfolio_positions WHERE ticker = ANY($1)' USING bad_tickers;
+  END IF;
+
+  -- CASCADE handles automatically: company_sentiment, alert_rules,
+  --   dividends, sector_kpis, chat_history
+  DELETE FROM companies WHERE ticker = ANY(bad_tickers);
+END; $$;
+```
+
+**Tables WITHOUT CASCADE FK to companies:** peer_group_members, company_events,
+calendar_events, watchlist_items, institutional_ownership, company_kpis, company_snapshot.
+
+**Tables WITH CASCADE:** company_sentiment, alert_rules, dividends, sector_kpis, chat_history.
+
+**Tables with NO FK (just text column):** price_history, company_financials,
+analyst_forecasts, event_impact_analysis, price_correlations, raw_ingest.
+
+**Note:** `portfolio_positions` and `portfolio_transactions` exist in migration 0018
+but were never applied to the remote DB — use IF EXISTS guard.
+
+---
+
 ## Migration Bug Pattern: DELETE + UPDATE Conflict (2026-02-26)
 
 **Problem:** A migration that DELETEs a ticker in KROK 1, then tries to UPDATE it in KROK 2,
