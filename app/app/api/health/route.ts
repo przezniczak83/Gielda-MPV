@@ -54,8 +54,8 @@ export async function GET() {
     supabase.from("raw_ingest").select("*",         { count: "exact", head: true }),
     supabase.from("price_history").select("*",      { count: "exact", head: true }),
     supabase.from("analyst_forecasts").select("*",  { count: "exact", head: true }),
-    supabase.from("raw_ingest")
-      .select("inserted_at").order("inserted_at", { ascending: false }).limit(1),
+    supabase.from("company_events")
+      .select("created_at").order("created_at", { ascending: false }).limit(1),
     supabase.from("price_history")
       .select("date").order("date", { ascending: false }).limit(1),
     supabase.from("company_events")
@@ -74,11 +74,11 @@ export async function GET() {
     return (res.value as { data: T[] | null }).data?.[0] ?? null;
   }
 
-  const lastIngestRow   = row<{ inserted_at: string }>(lastIngestRes as PromiseSettledResult<{ data: { inserted_at: string }[] | null }>);
+  const lastIngestRow   = row<{ created_at: string }>(lastIngestRes as PromiseSettledResult<{ data: { created_at: string }[] | null }>);
   const lastPriceRow    = row<{ date: string }>(lastPriceRes as PromiseSettledResult<{ data: { date: string }[] | null }>);
   const lastAlertRow    = row<{ alerted_at: string }>(lastAlertRes as PromiseSettledResult<{ data: { alerted_at: string }[] | null }>);
 
-  const lastEspi  = lastIngestRow?.inserted_at ?? null;
+  const lastEspi  = lastIngestRow?.created_at ?? null;
   const lastPrice = lastPriceRow?.date ? `${lastPriceRow.date}T18:00:00Z` : null; // approximate time
   const lastAlert = lastAlertRow?.alerted_at ?? null;
 
