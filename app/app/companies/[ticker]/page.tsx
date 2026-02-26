@@ -114,12 +114,24 @@ function CompanyPageLayout({
       <div className="max-w-4xl mx-auto px-6 py-10">
 
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-sm text-gray-500 mb-8">
-          <Link href="/companies" className="hover:text-gray-300 transition-colors">
-            Spółki
-          </Link>
-          <span className="text-gray-700">/</span>
-          <span className="text-gray-300 font-medium">{ticker}</span>
+        <nav className="flex items-center gap-1.5 text-xs text-gray-600 mb-6">
+          <Link href="/" className="hover:text-gray-400 transition-colors">Dashboard</Link>
+          <span>/</span>
+          <Link href="/companies" className="hover:text-gray-400 transition-colors">Spółki</Link>
+          <span>/</span>
+          <span className="text-gray-400 font-medium font-mono">{ticker}</span>
+          {sector && (
+            <>
+              <span className="ml-2 text-gray-700">·</span>
+              <span className="text-gray-600">{sector}</span>
+            </>
+          )}
+          {market && (
+            <>
+              <span className="text-gray-700">·</span>
+              <span className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-500">{market}</span>
+            </>
+          )}
         </nav>
 
         {/* Track visit (client, no render) */}

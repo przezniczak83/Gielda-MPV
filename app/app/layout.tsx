@@ -6,6 +6,8 @@ import GlobalSearch from "./components/GlobalSearch";
 import LeftSidebar  from "./components/LeftSidebar";
 import dynamic      from "next/dynamic";
 
+const BackToTop = dynamic(() => import("./components/BackToTop"), { ssr: false });
+
 const TickerTape = dynamic(() => import("./components/TickerTape"), { ssr: false });
 
 const geistSans = Geist({
@@ -60,6 +62,7 @@ export default function RootLayout({
             {children}
           </main>
         </div>
+        <BackToTop />
       </body>
     </html>
   );
