@@ -907,3 +907,142 @@ await sendTelegram(tgMsg.slice(0, 3900));
 
 **Idempotency:** Check `week_start` unique constraint before generating; `force=true` to regenerate.
 
+---
+
+## Stooq WIBOR CSV Pattern (Edge Function)
+
+```typescript
+async function fetchStooqWIBOR(symbol: string): Promise<number | null> {
+  // symbol: "^wibor1m" | "^wibor3m" | "^wibor6m"
+  const url = `https://stooq.pl/q/d/l/?s=${encodeURIComponent(symbol)}&i=d&l=5`;
+  const res  = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+  if (!res.ok) return null;
+  const csv  = await res.text();
+  if (csv.trim().startsWith("Brak") || csv.trim().length < 20) return null;
+  const lines = csv.trim().split("\n").filter(l => l.trim() && !l.startsWith("Data"));
+  const last  = lines[lines.length - 1]?.split(",");
+  return last ? parseFloat(last[4]) : null; // Zamkniecie (Close) at index 4
+}
+
+// Usage in fetch-macro EF:
+const [wibor1m, wibor3m, wibor6m] = await Promise.all([
+  fetchStooqWIBOR("^wibor1m"),
+  fetchStooqWIBOR("^wibor3m"),
+  fetchStooqWIBOR("^wibor6m"),
+]);
+```
+
+**Note:** WIBOR index symbols work from EF IPs; regular GPW stock tickers do NOT.
+
+---
+
+## GUS BDL CPI Pattern (Edge Function)
+
+```typescript
+async function fetchGUSCPI(): Promise<{ value: number; period: string } | null> {
+  // Variable 645 = CPI YoY (inflation rate %)
+  const url = "https://bdl.stat.gov.pl/api/v1/data/by-variable/645?format=json&lang=pl&page-size=5&sort=-period";
+  const res  = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const values = data.results?.[0]?.values ?? [];
+  if (!values.length) return null;
+  const latest = values[0];
+  // Convert period "2025M12" → "2025-12-01"
+  const period = latest.period.replace(/M(\d+)$/, (_, m) => `-${m.padStart(2, "0")}-01`);
+  return { value: Number(latest.val), period };
+}
+```
+
+**Free, no API key required. Works from Supabase Edge Function IPs.**
+
+---
+
+## Resend Email Pattern (Edge Function)
+
+```typescript
+// supabase/functions/_shared/email.ts
+export async function sendEmail(opts: {
+  to: string; subject: string; html: string;
+}): Promise<boolean> {
+  const apiKey    = Deno.env.get("RESEND_API_KEY");
+  const fromEmail = Deno.env.get("ALERT_FROM_EMAIL") ?? "noreply@example.com";
+  if (!apiKey) return false;
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method:  "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: fromEmail, to: opts.to, subject: opts.subject, html: opts.html }),
+  });
+  return res.ok;
+}
+
+// Usage in send-alerts — only for high-impact events:
+const alertEmail = Deno.env.get("ALERT_EMAIL");
+if (alertEmail && event.impact_score >= 8) {
+  await sendEmail({ to: alertEmail, subject: `Alert: ${ticker}`, html: buildAlertEmail({ ... }) });
+}
+```
+
+**Required secrets:** `RESEND_API_KEY`, `ALERT_EMAIL`, `ALERT_FROM_EMAIL`
+
+---
+
+## AI Report Generation + Caching Pattern
+
+```typescript
+// POST /api/generate-report { ticker, force?: boolean }
+
+// 1. Check cache (company_kpis with kpi_type='report', 24h TTL)
+if (!force) {
+  const { data: cached } = await db.from("company_kpis")
+    .select("metadata, updated_at").eq("ticker", ticker).eq("kpi_type", "report").maybeSingle();
+  if (cached?.metadata?.report_md) {
+    const ageHours = (Date.now() - new Date(cached.updated_at).getTime()) / 3_600_000;
+    if (ageHours < 24) return { ok: true, report_md: cached.metadata.report_md, cached: true };
+  }
+}
+
+// 2. Fetch data + call Claude Sonnet (2000 max_tokens)
+const reportMd = await callClaude(systemPrompt, dataPrompt);
+
+// 3. Cache result
+await db.from("company_kpis").upsert(
+  { ticker, kpi_type: "report", value: null, metadata: { report_md: reportMd }, updated_at: new Date().toISOString() },
+  { onConflict: "ticker,kpi_type" },
+);
+```
+
+**Print/PDF:** Use `window.print()` + print CSS media queries. Hide buttons with `print:hidden`.
+**No new table needed** — reuse `company_kpis` with `kpi_type='report'`.
+
+---
+
+## Chat History Multi-Turn Pattern
+
+```typescript
+// 1. Load history (API route → DB)
+// GET /api/chat-history?ticker=X → last 20 messages chronological
+
+// 2. Build messages array with required alternation
+const messages = [
+  { role: "user",      content: contextPrompt },          // system context
+  { role: "assistant", content: "Rozumiem. Mam dostęp do danych spółki." }, // placeholder
+  ...chatHistory.map(m => ({ role: m.role, content: m.content })), // past turns
+  { role: "user",      content: userQuestion },            // current question
+];
+
+// 3. Save user message before API call (fire-and-forget)
+fetch("/api/chat-history", { method: "POST", body: JSON.stringify({ ticker, role: "user", content: userQuestion }) });
+
+// 4. After streaming completes, save assistant response
+fetch("/api/chat-history", { method: "POST", body: JSON.stringify({ ticker, role: "assistant", content: answer }) });
+
+// 5. Clear history
+fetch(`/api/chat-history?ticker=${ticker}`, { method: "DELETE" });
+```
+
+**DB schema:** `chat_history(ticker, role CHECK IN ('user','assistant'), content, created_at)`
+**Anthropic rule:** Must alternate user/assistant roles. The placeholder assistant message
+after the context block ensures valid format regardless of history state.
+

@@ -700,3 +700,170 @@ if (rows.length === 0) {
 return NextResponse.json(rows); // immediately return empty
 ```
 
+---
+
+## GUS BDL API — PL CPI (2026-02-26)
+
+**Source:** GUS Bank Danych Lokalnych, free, no API key required.
+**Variable 645** = CPI YoY (inflation rate, %).
+
+```typescript
+const url = "https://bdl.stat.gov.pl/api/v1/data/by-variable/645?format=json&lang=pl&page-size=5&sort=-period";
+const res  = await fetch(url, { headers: { "Accept": "application/json" } });
+const data = await res.json();
+const results = data.results?.[0]?.values ?? []; // array sorted newest first
+const latest  = results[0]; // { year, period, val }
+```
+
+**Response shape:**
+- `results[0].values[0].val` — latest value (number)
+- `results[0].values[0].period` — period label (e.g. `"2025M12"`)
+- Convert period: `"2025M12"` → `"2025-12-01"` by replacing `"M"` with `"-"` + append `"-01"`
+
+**Confirmed working from Supabase Edge Functions** (no IP restrictions).
+
+---
+
+## Stooq WIBOR Indices (2026-02-26)
+
+**Working:** WIBOR index symbols (`^wibor1m`, `^wibor3m`, `^wibor6m`) are accessible from Supabase Edge Function IPs.
+**Not working:** Regular GPW stock tickers (e.g. `pkn`, `kgh`) — blocked from EF IPs.
+
+```typescript
+async function fetchStooqCSV(symbol: string): Promise<number | null> {
+  const url = `https://stooq.pl/q/d/l/?s=${encodeURIComponent(symbol)}&i=d&l=5`;
+  const res  = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+  const csv  = await res.text();
+  if (csv.trim().startsWith("Brak") || csv.trim().length < 20) return null;
+  const lines = csv.trim().split("\n").filter(l => l.trim() && !l.startsWith("Data"));
+  const last  = lines[lines.length - 1]?.split(",");
+  return last ? parseFloat(last[4]) : null; // column index 4 = Zamkniecie (Close)
+}
+```
+
+**Symbols:** `^wibor1m`, `^wibor3m`, `^wibor6m` (caret prefix required for indices).
+
+---
+
+## Resend Email Setup (2026-02-26)
+
+**API:** `POST https://api.resend.com/emails` with `Authorization: Bearer RESEND_API_KEY`.
+**Required secrets:**
+- `RESEND_API_KEY` — API key from resend.com dashboard
+- `ALERT_FROM_EMAIL` — verified sender address (e.g. `alerts@yourdomain.com`)
+- `ALERT_EMAIL` — recipient address
+
+```typescript
+async function sendEmail(opts: { to: string; subject: string; html: string }): Promise<void> {
+  const apiKey  = Deno.env.get("RESEND_API_KEY");
+  const fromEmail = Deno.env.get("ALERT_FROM_EMAIL") ?? "noreply@example.com";
+  if (!apiKey) return; // silently skip if not configured
+
+  await fetch("https://api.resend.com/emails", {
+    method:  "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: fromEmail, to: opts.to, subject: opts.subject, html: opts.html }),
+  });
+}
+```
+
+**Rule:** Always guard with `if (!apiKey) return;` — email is optional, Telegram is primary.
+**High-impact threshold:** Only send email for events with `impact_score >= 8`.
+
+---
+
+## Client Component Pattern for Widgets inside Client Tabs (2026-02-26)
+
+**Problem:** `CompanyTabs` is a `"use client"` component. Any widget imported via
+`dynamic()` with `ssr: false` inside a client component must itself be a client component.
+Server components cannot be rendered as children of a "use client" dynamic import.
+
+**Wrong approach:**
+```typescript
+// ❌ SectorKPIsWidget as server component with direct Supabase queries
+// → Fails: hooks (useState, useEffect) unavailable in server components
+// → Fails: dynamic(ssr:false) inside "use client" cannot import server component
+```
+
+**Correct approach:**
+```typescript
+// ✅ 1. Widget is a "use client" component
+"use client";
+export default function SectorKPIsWidget({ ticker, sector }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    fetch(`/api/sector-kpis?ticker=${ticker}`).then(r => r.json()).then(setData);
+  }, [ticker]);
+  return <div>...</div>;
+}
+
+// ✅ 2. API route fetches from Supabase server-side
+// app/api/sector-kpis/route.ts → queries DB, returns JSON
+
+// ✅ 3. Import in CompanyTabs with dynamic
+const SectorKPIsWidget = dynamic(() => import("./SectorKPIsWidget"), { ssr: false });
+```
+
+**Rule:** Any widget used inside a `"use client"` parent via `dynamic()` must be `"use client"` too.
+Create a dedicated API route for DB access in these cases.
+
+---
+
+## AI Report Caching via company_kpis (2026-02-26)
+
+**Pattern:** Reuse existing `company_kpis` table for report caching instead of adding a new table.
+Uses `kpi_type = 'report'` with JSONB `metadata.report_md` field.
+
+```typescript
+// Check cache (24h TTL)
+const { data: cached } = await db.from("company_kpis")
+  .select("metadata, updated_at")
+  .eq("ticker", ticker).eq("kpi_type", "report").maybeSingle();
+
+if (cached?.metadata?.report_md) {
+  const ageHours = (Date.now() - new Date(cached.updated_at).getTime()) / 3_600_000;
+  if (ageHours < 24) return { ok: true, report_md: cached.metadata.report_md, cached: true };
+}
+
+// Save after generation
+await db.from("company_kpis").upsert(
+  { ticker, kpi_type: "report", value: null, metadata: { report_md: reportMd }, updated_at: new Date().toISOString() },
+  { onConflict: "ticker,kpi_type" },
+);
+```
+
+**Force refresh:** Accept `force: boolean` parameter to bypass cache check.
+
+---
+
+## Chat History Multi-Turn Claude Pattern (2026-02-26)
+
+**Problem:** Anthropic's messages API requires strict user/assistant alternation. When
+prepending a context/system message as a user turn, Claude must have a corresponding
+assistant turn before the next user message.
+
+**Solution:** Insert a placeholder assistant acknowledgment after the context message:
+
+```typescript
+// Build message history for Claude
+const historyMessages = [];
+
+// 1. Context message (user turn)
+historyMessages.push({ role: "user", content: contextPrompt });
+// 2. Placeholder assistant ack (required to maintain alternation)
+historyMessages.push({ role: "assistant", content: "Rozumiem. Mam dostęp do danych spółki." });
+
+// 3. Loaded chat history from DB (already in user/assistant pairs)
+for (const msg of chatHistory) {
+  historyMessages.push({ role: msg.role, content: msg.content });
+}
+
+// 4. Current user question
+historyMessages.push({ role: "user", content: userQuestion });
+```
+
+**Storage:** `chat_history` table with `(ticker, role, content, created_at)`.
+**Load:** GET `/api/chat-history?ticker=X` returns last 20 messages in chronological order.
+**Save:** POST user message before API call; POST assistant response after streaming completes.
+**Clear:** DELETE `/api/chat-history?ticker=X` to reset conversation.
+
