@@ -17,6 +17,7 @@
 import { getSupabaseClient } from "../_shared/supabase-client.ts";
 import { createLogger }      from "../_shared/logger.ts";
 import { sendTelegram }      from "../_shared/telegram.ts";
+import { sendEmail, buildAlertEmail } from "../_shared/email.ts";
 import { okResponse, errorResponse } from "../_shared/response.ts";
 
 const log = createLogger("send-alerts");
@@ -132,12 +133,15 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     return errorResponse(err instanceof Error ? err.message : String(err));
   }
 
-  const tgToken  = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
-  const tgChatId = Deno.env.get("TELEGRAM_CHAT_ID")   ?? "";
+  const tgToken    = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
+  const tgChatId   = Deno.env.get("TELEGRAM_CHAT_ID")   ?? "";
+  const alertEmail = Deno.env.get("ALERT_EMAIL")        ?? "";
+  const tgOk       = !!(tgToken && tgChatId);
+  const emailOk    = !!(alertEmail && Deno.env.get("RESEND_API_KEY"));
 
-  if (!tgToken || !tgChatId) {
-    log.warn("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — skipping");
-    return okResponse({ sent: 0, skipped_reason: "telegram_not_configured" });
+  if (!tgOk && !emailOk) {
+    log.warn("Neither Telegram nor Email configured — skipping");
+    return okResponse({ sent: 0, skipped_reason: "no_notification_channel" });
   }
 
   // ── Load active alert rules ────────────────────────────────────────────────
@@ -246,9 +250,30 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     if (!matchedRule) continue;
 
     try {
-      const message = formatMessage(event, matchedRule.rule_name);
-      const ok      = await sendTelegram(message);
-      if (!ok) throw new Error("sendTelegram returned false");
+      let anyOk = false;
+
+      // ── Telegram ──────────────────────────────────────────────────────────
+      if (tgOk) {
+        const message = formatMessage(event, matchedRule.rule_name);
+        const tgSent  = await sendTelegram(message);
+        if (tgSent) anyOk = true;
+        else log.warn(`${event.ticker} Telegram send failed`);
+      }
+
+      // ── Email (for high-impact events: score >= 8) ─────────────────────
+      if (emailOk && event.impact_score >= 8) {
+        const { subject, html, text } = buildAlertEmail({
+          ticker:       event.ticker,
+          title:        event.title,
+          impact_score: event.impact_score,
+          event_type:   event.event_type,
+          published_at: event.published_at,
+        });
+        const emailSent = await sendEmail({ to: alertEmail, subject, html, text });
+        if (emailSent) { anyOk = true; log.info(`${event.ticker} email sent`); }
+      }
+
+      if (!anyOk) throw new Error("All notification channels failed");
 
       const now = new Date().toISOString();
       const { error: updateErr } = await supabase

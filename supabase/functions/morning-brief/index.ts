@@ -13,6 +13,7 @@
 import { getSupabaseClient } from "../_shared/supabase-client.ts";
 import { createLogger }      from "../_shared/logger.ts";
 import { sendTelegram }      from "../_shared/telegram.ts";
+import { sendEmail, buildMorningBriefEmail } from "../_shared/email.ts";
 import { okResponse, errorResponse } from "../_shared/response.ts";
 
 const log = createLogger("morning-brief");
@@ -201,13 +202,30 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
   const message = lines.join("\n");
 
-  // ── Send ───────────────────────────────────────────────────────────────────
-  const ok = await sendTelegram(message);
-  if (!ok) {
+  // ── Send Telegram ──────────────────────────────────────────────────────────
+  const tgSent = await sendTelegram(message);
+  if (!tgSent) {
     log.warn("Telegram not configured or send failed");
-    return okResponse({ sent: false, reason: "telegram_not_configured", lines: lines.length });
+  } else {
+    log.info("Morning brief sent via Telegram");
   }
 
-  log.info("Morning brief sent successfully");
-  return okResponse({ sent: true, alerts: alerts.length, calendar: calendar.length, recs: recs.length });
+  // ── Send Email ─────────────────────────────────────────────────────────────
+  const alertEmail = Deno.env.get("ALERT_EMAIL") ?? "";
+  let emailSent = false;
+  if (alertEmail && Deno.env.get("RESEND_API_KEY")) {
+    const dateStr = new Date().toLocaleDateString("pl-PL", {
+      day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/Warsaw",
+    });
+    const { subject, html, text } = buildMorningBriefEmail({
+      date:    dateStr,
+      events:  alerts,
+      sentiment: null,
+    });
+    emailSent = await sendEmail({ to: alertEmail, subject, html, text });
+    if (emailSent) log.info("Morning brief sent via email");
+  }
+
+  log.info(`Done: tg=${tgSent} email=${emailSent}`);
+  return okResponse({ sent: tgSent || emailSent, telegram: tgSent, email: emailSent, alerts: alerts.length, calendar: calendar.length, recs: recs.length });
 });
