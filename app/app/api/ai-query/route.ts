@@ -120,22 +120,49 @@ export async function POST(req: NextRequest) {
 
   const db = supabase();
 
-  // ── Fetch context: snapshot (fast) or live ───────────────────────────────
+  // ── Fetch context + last 10 history messages in parallel ─────────────────
   let context: string;
-  const { data: snapRow } = await db
-    .from("company_snapshot")
-    .select("snapshot, computed_at")
-    .eq("ticker", ticker)
-    .maybeSingle();
+  const [snapResult, historyResult] = await Promise.all([
+    db.from("company_snapshot").select("snapshot, computed_at").eq("ticker", ticker).maybeSingle(),
+    db.from("chat_history")
+      .select("role, content")
+      .eq("ticker", ticker)
+      .order("created_at", { ascending: false })
+      .limit(10),
+  ]);
 
-  if (snapRow && isFresh(snapRow.computed_at, 30)) {
-    context = buildContextFromSnapshot(snapRow.snapshot as SnapshotData, ticker);
+  if (snapResult.data && isFresh(snapResult.data.computed_at, 30)) {
+    context = buildContextFromSnapshot(snapResult.data.snapshot as SnapshotData, ticker);
   } else {
     context = await buildContextFromDB(ticker, db);
   }
 
-  // ── Anthropic streaming with prompt caching (TASK 6) ─────────────────────
-  // cache_control on system + context = 83% cheaper on repeated queries for same ticker
+  // History messages in chronological order (oldest first)
+  const historyMessages = ((historyResult.data ?? []) as Array<{ role: string; content: string }>)
+    .reverse()
+    .map(h => ({ role: h.role as "user" | "assistant", content: h.content }));
+
+  // Save user message to DB (fire-and-forget)
+  db.from("chat_history").insert({ ticker, role: "user", content: question }).then(() => {});
+
+  // Build messages array: context + history + current question
+  const messages: Array<{ role: "user" | "assistant"; content: unknown }> = [
+    {
+      role: "user",
+      content: [
+        {
+          type:          "text",
+          text:          `Dane spółki:\n\n${context}`,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+    },
+    { role: "assistant", content: "Rozumiem. Mam dostęp do danych spółki." },
+    ...historyMessages,
+    { role: "user", content: `Pytanie: ${question}` },
+  ];
+
+  // ── Anthropic streaming with prompt caching ───────────────────────────────
   const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
     method:  "POST",
     headers: {
@@ -152,26 +179,10 @@ export async function POST(req: NextRequest) {
         {
           type:          "text",
           text:          SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral" }, // cache the system prompt
+          cache_control: { type: "ephemeral" },
         },
       ],
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type:          "text",
-              text:          `Dane spółki:\n\n${context}`,
-              cache_control: { type: "ephemeral" }, // cache the context (changes ~30 min)
-            },
-            {
-              type: "text",
-              text: `Pytanie: ${question}`,
-              // question is NOT cached — different every time
-            },
-          ],
-        },
-      ],
+      messages,
     }),
   });
 

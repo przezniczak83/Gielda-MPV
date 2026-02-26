@@ -3,22 +3,34 @@
 import { useState, useRef, useEffect } from "react";
 
 interface Message {
-  question:   string;
-  answer:     string;
-  model_used: string;
+  role:    "user" | "assistant";
+  content: string;
 }
 
 export default function AiChat({ ticker }: { ticker: string }) {
-  const [question, setQuestion]           = useState("");
-  const [loading,  setLoading]            = useState(false);
-  const [error,    setError]              = useState<string | null>(null);
-  const [history,  setHistory]            = useState<Message[]>([]);
+  const [question,   setQuestion]   = useState("");
+  const [loading,    setLoading]    = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
+  const [history,    setHistory]    = useState<Message[]>([]);
+  const [loadingHist, setLoadingHist] = useState(true);
   // Streaming state
-  const [streamingQ, setStreamingQ]       = useState<string>("");
-  const [streamingA, setStreamingA]       = useState<string>("");
+  const [streamingQ, setStreamingQ] = useState<string>("");
+  const [streamingA, setStreamingA] = useState<string>("");
 
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Load persistent history on mount
+  useEffect(() => {
+    setLoadingHist(true);
+    fetch(`/api/chat-history?ticker=${encodeURIComponent(ticker)}`)
+      .then(r => r.json())
+      .then((rows: Array<{ role: "user" | "assistant"; content: string }>) => {
+        setHistory(rows);
+        setLoadingHist(false);
+      })
+      .catch(() => setLoadingHist(false));
+  }, [ticker]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -89,12 +101,19 @@ export default function AiChat({ ticker }: { ticker: string }) {
         }
       }
 
-      // ── Move to history ──────────────────────────────────────────────────
+      // ── Save to DB + update local history ────────────────────────────────
       if (answer) {
         setHistory(prev => [
-          ...prev.slice(-2),
-          { question: q, answer, model_used: "claude-sonnet (streaming)" },
+          ...prev,
+          { role: "user",      content: q },
+          { role: "assistant", content: answer },
         ]);
+        // Save assistant response to DB (user message already saved by server)
+        fetch("/api/chat-history", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ ticker, role: "assistant", content: answer }),
+        }).catch(() => {});
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Błąd połączenia");
@@ -104,6 +123,13 @@ export default function AiChat({ ticker }: { ticker: string }) {
       setStreamingA("");
     }
   };
+
+  function handleClearHistory() {
+    if (!confirm("Wyczyścić historię rozmowy?")) return;
+    fetch(`/api/chat-history?ticker=${encodeURIComponent(ticker)}`, { method: "DELETE" })
+      .then(() => setHistory([]))
+      .catch(() => {});
+  }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -119,31 +145,43 @@ export default function AiChat({ ticker }: { ticker: string }) {
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
           AI Analiza
         </span>
-        <span className="text-xs text-gray-600">Claude Sonnet · streaming</span>
+        <div className="flex items-center gap-3">
+          {history.length > 0 && (
+            <button
+              onClick={handleClearHistory}
+              className="text-xs text-gray-600 hover:text-red-400 transition-colors"
+            >
+              wyczyść historię
+            </button>
+          )}
+          <span className="text-xs text-gray-600">Claude Sonnet · streaming</span>
+        </div>
       </div>
 
       {/* History */}
-      {history.length > 0 && (
+      {loadingHist ? (
+        <div className="px-4 py-6 flex justify-center">
+          <div className="flex gap-1 items-center">
+            <span className="w-1.5 h-1.5 bg-gray-600 rounded-full animate-bounce [animation-delay:0ms]" />
+            <span className="w-1.5 h-1.5 bg-gray-600 rounded-full animate-bounce [animation-delay:150ms]" />
+            <span className="w-1.5 h-1.5 bg-gray-600 rounded-full animate-bounce [animation-delay:300ms]" />
+          </div>
+        </div>
+      ) : history.length > 0 && (
         <div className="divide-y divide-gray-800/60 max-h-80 overflow-y-auto">
           {history.map((msg, i) => (
-            <div key={i} className="px-4 py-3 space-y-2">
-              <div className="flex justify-end">
+            <div key={i} className={`px-4 py-3 ${msg.role === "user" ? "flex justify-end" : "flex justify-start"}`}>
+              {msg.role === "user" ? (
                 <div className="bg-blue-600/20 border border-blue-500/20 rounded-xl rounded-tr-sm px-3 py-2 max-w-[85%]">
-                  <p className="text-sm text-blue-200">{msg.question}</p>
+                  <p className="text-sm text-blue-200">{msg.content}</p>
                 </div>
-              </div>
-              <div className="flex justify-start">
+              ) : (
                 <div className="bg-gray-800/60 rounded-xl rounded-tl-sm px-3 py-2 max-w-[90%]">
                   <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
-                    {msg.answer}
+                    {msg.content}
                   </p>
-                  <div className="mt-1.5">
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-500 font-mono">
-                      {msg.model_used}
-                    </span>
-                  </div>
                 </div>
-              </div>
+              )}
             </div>
           ))}
         </div>

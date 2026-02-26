@@ -156,27 +156,43 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return new Response(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }), { status: 500, headers: CORS });
   }
 
-  // ── Fetch context data in parallel ────────────────────────────────────────
+  // ── Fetch context data + chat history in parallel ─────────────────────────
   const [
     { data: companyData, error: compErr },
     { data: eventsData  },
     { data: pricesData  },
+    { data: historyData },
   ] = await Promise.all([
     supabase.from("companies").select("ticker, name, sector, market, has_subsidiaries").eq("ticker", ticker).maybeSingle(),
     supabase.from("company_events").select("title, event_type, impact_score, published_at, source").eq("ticker", ticker).order("published_at", { ascending: false }).limit(10),
     supabase.from("price_history").select("date, close, volume").eq("ticker", ticker).order("date", { ascending: false }).limit(1),
+    supabase.from("chat_history").select("role, content, created_at").eq("ticker", ticker).order("created_at", { ascending: false }).limit(10),
   ]);
 
   if (compErr) return new Response(JSON.stringify({ ok: false, error: compErr.message }), { status: 500, headers: CORS });
   if (!companyData) return new Response(JSON.stringify({ ok: false, error: `Ticker ${ticker} not found` }), { status: 404, headers: CORS });
 
-  const events = (eventsData ?? []) as CompanyEvent[];
-  const prices = (pricesData ?? []) as PriceRecord[];
-  log.info(`context: events=${events.length} prices=${prices.length}`);
+  const events  = (eventsData  ?? []) as CompanyEvent[];
+  const prices  = (pricesData  ?? []) as PriceRecord[];
+  // Reverse history so oldest messages come first
+  const history = ((historyData ?? []) as Array<{ role: string; content: string; created_at: string }>)
+    .reverse();
+
+  log.info(`context: events=${events.length} prices=${prices.length} history=${history.length}`);
 
   const context = buildContext(companyData as Company, events, prices);
 
-  // ── Anthropic with prompt caching (Task 6) ─────────────────────────────────
+  // ── Save user message to chat_history ─────────────────────────────────────
+  await supabase.from("chat_history").insert({ ticker, role: "user", content: question });
+
+  // ── Build messages with history ────────────────────────────────────────────
+  // First message includes the company context; history messages follow
+  const historyMessages = history.map(h => ({
+    role:    h.role as "user" | "assistant",
+    content: h.content,
+  }));
+
+  // ── Anthropic with prompt caching ──────────────────────────────────────────
   // cache_control on system + context → 83% cheaper for repeated ticker queries
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
   const openaiKey    = Deno.env.get("OPENAI_API_KEY")    ?? "";
@@ -184,7 +200,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let modelUsed: string;
 
   try {
-    log.info("Calling Claude with prompt caching");
+    log.info("Calling Claude with prompt caching + history");
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method:  "POST",
       headers: {
@@ -204,6 +220,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           },
         ],
         messages: [
+          // Context as first user message (cached)
           {
             role: "user",
             content: [
@@ -212,12 +229,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
                 text:          `Dane spółki:\n\n${context}`,
                 cache_control: { type: "ephemeral" },
               },
-              {
-                type: "text",
-                text: `Pytanie: ${question}`,
-              },
             ],
           },
+          // Placeholder assistant ack (required to continue conversation)
+          { role: "assistant", content: "Rozumiem. Mam dostęp do danych spółki." },
+          // History messages
+          ...historyMessages,
+          // Current question
+          { role: "user", content: `Pytanie: ${question}` },
         ],
       }),
     });
@@ -234,12 +253,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return new Response(JSON.stringify({ ok: false, error: `Anthropic failed and no OpenAI key: ${msg}` }), { status: 502, headers: CORS });
     }
     try {
-      answer    = await callOpenAI(openaiKey, `Dane spółki:\n\n${context}\n\nPytanie: ${question}`);
+      const historyText = historyMessages.map(h => `${h.role === "user" ? "User" : "Assistant"}: ${h.content}`).join("\n");
+      const fullPrompt  = [
+        `Dane spółki:\n\n${context}`,
+        historyText ? `\nHistoria rozmowy:\n${historyText}` : "",
+        `\nPytanie: ${question}`,
+      ].filter(Boolean).join("\n");
+      answer    = await callOpenAI(openaiKey, fullPrompt);
       modelUsed = "gpt-4o-mini (fallback)";
     } catch (fbErr) {
       const fb = fbErr instanceof Error ? fbErr.message : String(fbErr);
       return new Response(JSON.stringify({ ok: false, error: `Both AI providers failed. Last: ${fb}` }), { status: 502, headers: CORS });
     }
+  }
+
+  // ── Save assistant response to chat_history ────────────────────────────────
+  if (answer) {
+    await supabase.from("chat_history").insert({ ticker, role: "assistant", content: answer });
   }
 
   log.info(`Done model=${modelUsed} len=${answer.length}`);
