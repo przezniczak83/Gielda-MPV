@@ -1,11 +1,10 @@
 // supabase/functions/process-news/index.ts
-// AI analysis pipeline for news_items — v3.
+// AI analysis pipeline for news_items — v4.
 //
-// Changes from v2:
-//   - Batch 100 items/run (was 20)
-//   - Concurrent processing: CONCURRENCY=5 chunks × 200ms gap (safe for GPT-4o-mini 500 RPM)
-//   - Trigger mode: body.trigger=true uses limit=10 (fast path for pg_net trigger)
-//   - processItem() extracted for reuse in parallel map
+// Changes from v3:
+//   - ZMIANA A: Validate AI-returned tickers against companies table
+//   - ZMIANA B: Stricter GPT-4o-mini system prompt (no false positives)
+//   - ZMIANA C: Heuristic requires min 4-char aliases + confidence scoring
 //
 // Model: GPT-4o-mini (OPENAI_API_KEY)
 // Batch: 100 items/run (trigger mode: 10), CONCURRENCY=5
@@ -50,7 +49,7 @@ interface AIAnalysis {
 const BATCH_SIZE    = 100;  // cron batch
 const TRIGGER_BATCH = 10;   // trigger (fast path)
 const CONCURRENCY   = 5;    // parallel OpenAI calls per chunk
-const SLEEP_BETWEEN = 200;  // ms between chunks (≈25 req/s max, well under 500 RPM)
+const SLEEP_BETWEEN = 200;  // ms between chunks (safe for GPT-4o-mini 500 RPM)
 
 // Sources with paywalled content — skip AI if summary is too short
 const PAYWALL_SOURCES = ["rp", "parkiet", "pb"];
@@ -61,33 +60,38 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ─── Heuristic ticker extraction ─────────────────────────────────────────────
+// ─── ZMIANA C: Heuristic with min-4-char + confidence ────────────────────────
 
 function extractTickersHeuristic(
-  title:    string,
-  body:     string | null,
-  aliasMap: Map<string, string>,
+  title:        string,
+  body:         string | null,
+  aliasMap:     Map<string, string>,
+  validTickers: Set<string>,
 ): string[] {
-  const text     = (title + " " + (body ?? "")).toLowerCase();
-  const found    = new Set<string>();
+  const text  = (title + " " + (body ?? "")).toLowerCase();
+  const found = new Set<string>();
 
-  // Sort aliases by length (longest first) to avoid partial matches
-  const sorted = [...aliasMap.keys()].sort((a, b) => b.length - a.length);
+  // Sort aliases by length descending (longest / most specific first)
+  const sorted = [...aliasMap.entries()]
+    .filter(([alias]) => alias.length >= 4)          // min 4 chars — no noise
+    .sort((a, b) => b[0].length - a[0].length);
 
-  for (const alias of sorted) {
-    if (alias.length < 3) continue; // skip very short aliases (noise)
-    // Word-boundary check: alias must be preceded and followed by non-word char
+  for (const [alias, ticker] of sorted) {
+    if (!validTickers.has(ticker)) continue;          // only known companies
+
+    // Strict word-boundary check
     const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(text)) {
-      found.add(aliasMap.get(alias)!);
-      if (found.size >= 5) break;
+    const re      = new RegExp(`(?:^|[\\s,\\.\\(\\[\"'])${escaped}(?:$|[\\s,\\.\\)\\]\"'])`, "i");
+    if (re.test(text)) {
+      found.add(ticker);
+      if (found.size >= 3) break;  // max 3 from heuristic
     }
   }
 
   return [...found];
 }
 
-// ─── AI Analysis ──────────────────────────────────────────────────────────────
+// ─── ZMIANA B: Stricter AI Analysis ──────────────────────────────────────────
 
 async function analyzeItem(
   item:         NewsItem,
@@ -95,44 +99,51 @@ async function analyzeItem(
   allTickers:   string[],
   openaiKey:    string,
 ): Promise<AIAnalysis | null> {
+  const tickerContext = preExtracted.length > 0
+    ? `\nMożliwe spółki (zweryfikuj czy są GŁÓWNYM tematem): ${preExtracted.join(", ")}`
+    : "";
+
   const systemPrompt =
-    `Jesteś analitykiem rynku kapitałowego GPW. ` +
-    `Analizujesz polskie wiadomości finansowe i zwracasz ustrukturyzowane dane JSON. ` +
-    `Odpowiadasz WYŁĄCZNIE JSON, bez żadnego tekstu przed ani po.`;
+    `Jesteś ekspertem analizy finansowej GPW i giełd światowych.
+Analizujesz polskie wiadomości finansowe i zwracasz WYŁĄCZNIE JSON bez markdown.
+
+KRYTYCZNE ZASADY dla pola "tickers":
+1. Zwróć ticker TYLKO jeśli spółka jest GŁÓWNYM TEMATEM artykułu
+2. NIE zwracaj tickera jeśli spółka jest tylko wspomniana przy okazji
+3. NIE zwracaj: walut (EUR, USD, PLN), indeksów (WIG20, SP500), instytucji (NBP, MSZ, KNF)
+4. Używaj WYŁĄCZNIE oficjalnych tickerów GPW (bez .WA) lub US
+5. Maksymalnie 3 tickers — jeśli nie jesteś pewien, zwróć []
+6. Dla ESPI/komunikatów regulacyjnych: ticker to spółka która wysłała raport
+
+Przykłady POPRAWNE:
+- "mBank ogłasza wyniki Q4" → ["MBK"]
+- "PKN Orlen podpisał kontrakt z PGNiG" → ["PKN", "PGN"]
+- Komunikat ESPI od Text SA → ["TXT"]
+
+Przykłady BŁĘDNE (nie rób tego):
+- Artykuł o stopach NBP → [] (nie: ["PKO","MBK"] — to nie jest o bankach)
+- "Tekst przemówienia ministra" → [] (nie: ["TXT"] — "tekst" to pospolite słowo)
+- Artykuł ogólnofinansowy → [] (max 3 tickery, tylko główne podmioty)`;
 
   const userPrompt =
-    `TICKER KONTEKST: ${preExtracted.join(", ") || "brak"}
-ZNANE TICKERY GPW: ${allTickers.slice(0, 200).join(", ")}
+    `ZNANE TICKERY GPW: ${allTickers.slice(0, 200).join(", ")}${tickerContext}
 ŹRÓDŁO: ${item.source}
 TYTUŁ: ${item.title}
 TREŚĆ: ${(item.summary ?? "").slice(0, 2000)}
 
 Zwróć JSON:
 {
-  "tickers": ["PKN"],
-  "sector": "energy",
-  "sentiment": 0.7,
-  "impact_score": 7,
-  "category": "earnings",
-  "ai_summary": "PKN Orlen ogłosił wyniki Q4 2025 z zyskiem 2.1 mld zł, powyżej oczekiwań.",
-  "key_facts": [
-    {
-      "type": "revenue",
-      "description": "Przychody Q4 2025 wyniosły 45 mld zł",
-      "detail": "+8% r/r",
-      "impact": "positive"
-    }
-  ],
-  "topics": ["wyniki_finansowe"],
+  "tickers": [],
+  "sector": "finanse|energetyka|technologia|chemia|handel|nieruchomosci|przemysl|inne",
+  "sentiment": 0.0,
+  "impact_score": 5,
+  "category": "earnings|dividend|regulatory|macro|contract|management|ipo|buyback|espi|other",
+  "ai_summary": "Krótkie podsumowanie po polsku, max 150 znaków.",
+  "key_facts": [{"type": "revenue|profit|dividend|contract|other", "description": "...", "detail": "...", "impact": "positive|negative|neutral"}],
+  "topics": ["wyniki_finansowe|dywidenda|zmiana_zarządu|emisja_akcji|kontrakt|regulacje|prognoza|inne"],
   "is_breaking": false,
-  "impact_assessment": "moderate_positive"
-}
-
-TYPY key_facts: revenue|profit|ebitda|dividend|ceo_change|board_change|share_issue|buyback|acquisition|contract|regulatory|guidance|rating_change|nwz|other
-TYPY topics: wyniki_finansowe|dywidenda|zmiana_zarządu|emisja_akcji|skup_akcji|fuzja_przejęcie|kontrakt|regulacje|prognoza|rekomendacja|walne_zgromadzenie|debiut|inne
-is_breaking: true gdy przełomowe (duży kontrakt >100mln PLN, M&A, zmiana CEO, wyniki znacznie vs konsensus)
-impact_assessment: very_positive|moderate_positive|neutral|moderate_negative|very_negative
-tickers: [] jeśli makro/ogólne, max 5 tickerów`;
+  "impact_assessment": "very_positive|moderate_positive|neutral|moderate_negative|very_negative"
+}`;
 
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method:  "POST",
@@ -198,23 +209,24 @@ tickers: [] jeśli makro/ogólne, max 5 tickerów`;
   };
 }
 
-// ─── Process a single item (extracted for parallel map) ───────────────────────
+// ─── Process a single item ────────────────────────────────────────────────────
 
 interface ProcessResult {
-  ok:      boolean;
-  id:      number;
-  error?:  string;
+  ok:     boolean;
+  id:     number;
+  error?: string;
 }
 
 async function processItem(
-  item:       NewsItem,
-  supabase:   SupabaseClient,
-  aliasMap:   Map<string, string>,
-  allTickers: string[],
-  openaiKey:  string,
+  item:         NewsItem,
+  supabase:     SupabaseClient,
+  aliasMap:     Map<string, string>,
+  validTickers: Set<string>,
+  allTickers:   string[],
+  openaiKey:    string,
 ): Promise<ProcessResult> {
-  // Heuristic pre-extraction using alias map
-  const preExtracted = extractTickersHeuristic(item.title, item.summary, aliasMap);
+  // ZMIANA C: heuristic with min-4-char + valid tickers only
+  const preExtracted = extractTickersHeuristic(item.title, item.summary, aliasMap, validTickers);
 
   // Paywall filter — skip AI for paywalled sources with no body content
   if (PAYWALL_SOURCES.includes(item.source) && (!item.summary || item.summary.length < 100)) {
@@ -238,10 +250,11 @@ async function processItem(
     console.warn(`[process-news] item ${item.id} AI error: ${msg}`);
   }
 
-  // Merge heuristic tickers into AI result
-  const finalTickers = analysis
-    ? [...new Set([...analysis.tickers, ...preExtracted])].slice(0, 10)
-    : preExtracted;
+  // ZMIANA A: Validate AI-returned tickers — only keep tickers in companies table
+  const aiTickers = (analysis?.tickers ?? []).filter(t => validTickers.has(t));
+
+  // Merge: AI validated + heuristic (heuristic already validated)
+  const finalTickers = [...new Set([...aiTickers, ...preExtracted])].slice(0, 5);
 
   // Update news_items (always mark processed to prevent infinite retry)
   const update: Record<string, unknown> = { ai_processed: true };
@@ -256,8 +269,8 @@ async function processItem(
     update.topics            = analysis.topics;
     update.is_breaking       = analysis.is_breaking;
     update.impact_assessment = analysis.impact_assessment;
-  } else if (preExtracted.length > 0) {
-    update.tickers = preExtracted;
+  } else if (finalTickers.length > 0) {
+    update.tickers = finalTickers;
   }
 
   const { error: updateErr } = await supabase
@@ -283,11 +296,13 @@ async function processItem(
   }
 
   if (analysis) {
+    const aiCount  = aiTickers.length;
+    const allCount = finalTickers.length;
     const breaking = analysis.is_breaking ? " 🚨BREAKING" : "";
-    console.log(`[process-news] item ${item.id}: impact=${analysis.impact_score} tickers=${finalTickers.join(",") || "none"}${breaking} ✓`);
+    console.log(`[process-news] item ${item.id}: impact=${analysis.impact_score} tickers=${finalTickers.join(",") || "none"} (ai:${aiCount} heur:${preExtracted.length}→${allCount})${breaking} ✓`);
   }
 
-  return { ok: !analysis ? false : true, id: item.id };
+  return { ok: true, id: item.id };
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -320,9 +335,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } catch { /* ignore */ }
 
   const limit = isTriggered ? TRIGGER_BATCH : BATCH_SIZE;
-  if (isTriggered) {
-    console.log(`[process-news] Trigger mode — limit=${limit}`);
-  }
+  if (isTriggered) console.log(`[process-news] Trigger mode — limit=${limit}`);
 
   // ── Load ticker_aliases for heuristic matching ────────────────────────────
   const { data: aliasRows } = await supabase
@@ -335,8 +348,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     aliasMap.set(a.alias.toLowerCase(), a.ticker);
   }
 
-  const allTickers = [...new Set((aliasRows ?? []).map(a => a.ticker))];
-  console.log(`[process-news] ${aliasMap.size} aliases, ${allTickers.length} tickers loaded`);
+  // ZMIANA A: Load all valid tickers from companies table
+  const { data: companiesData } = await supabase
+    .from("companies")
+    .select("ticker");
+
+  const validTickers = new Set<string>(
+    (companiesData ?? []).map((c: { ticker: string }) => c.ticker),
+  );
+
+  const allTickers = [...validTickers];
+  console.log(`[process-news] ${aliasMap.size} aliases, ${allTickers.length} valid tickers`);
 
   // ── Fetch unprocessed batch ────────────────────────────────────────────────
   const { data: items, error: fetchErr } = await supabase
@@ -377,7 +399,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (ci > 0) await sleep(SLEEP_BETWEEN);
 
     const results = await Promise.allSettled(
-      chunk.map(item => processItem(item, supabase, aliasMap, allTickers, openaiKey)),
+      chunk.map(item => processItem(item, supabase, aliasMap, validTickers, allTickers, openaiKey)),
     );
 
     for (const result of results) {

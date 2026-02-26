@@ -44,6 +44,50 @@ interface AliasRow {
   language:   string;
 }
 
+// ── Blacklist — never use these as aliases ────────────────────────────────────
+// Common words that cause false positives (appear in articles unrelated to the company)
+
+const BLACKLIST = new Set([
+  // Common Polish words
+  "text", "bank", "dom", "art", "eco", "net", "bit", "pro", "med",
+  "lab", "era", "one", "now", "act", "fast", "data", "tech",
+  "soft", "work", "fund", "star", "idea", "nova", "agro", "auto",
+  "home", "life", "care", "time", "link", "line", "next",
+  // Common English words
+  "group", "capital", "energy", "power", "global", "trade", "first",
+  "best", "real", "open", "core", "plus",
+  // Generic corporate words
+  "holding", "finance", "invest", "inwest", "euro",
+  "polska", "polish", "polskie", "national", "towarzystwo",
+  "spolka", "spólka", "spółka", "akcyjna", "limited", "investments",
+  // Currencies / indices / institutions (not companies)
+  "msz", "nbp", "eur", "usd", "pln", "gbp", "chf", "jpy",
+  "wig", "wig20", "mwig40", "swig80",
+  // Other ambiguous abbreviations
+  "gs", "ab", "pcc", "ons", "ono",
+]);
+
+// ── Alias validator ───────────────────────────────────────────────────────────
+
+function isValidAlias(alias: string, ticker: string): boolean {
+  const a = alias.trim().toLowerCase();
+
+  // Empty or too short
+  if (!a || a.length < 2) return false;
+
+  // On blacklist — always reject
+  if (BLACKLIST.has(a)) return false;
+
+  // Must contain at least 3 meaningful letters
+  if (!/[a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]{3,}/.test(a)) return false;
+
+  // For non-ticker aliases: require min 4 chars
+  // (ticker itself can be short: ART, GS, etc. — allowed as abbreviation)
+  if (a.length <= 3 && a !== ticker.toLowerCase()) return false;
+
+  return true;
+}
+
 // ── Alias generator ───────────────────────────────────────────────────────────
 
 function generateAliases(ticker: string, name: string): AliasRow[] {
@@ -52,14 +96,16 @@ function generateAliases(ticker: string, name: string): AliasRow[] {
 
   function add(raw: string, type: string) {
     const cleaned = raw.trim().toLowerCase();
-    if (cleaned.length < 2) return;
-    if (seen.has(cleaned))  return;
+    if (!isValidAlias(cleaned, ticker)) return;
+    if (seen.has(cleaned)) return;
     seen.add(cleaned);
     aliases.push({ ticker, alias: cleaned, alias_type: type, language: "pl" });
   }
 
-  // 1. Ticker (always)
-  add(ticker, "abbreviation");
+  // 1. Ticker abbreviation (always — even if short)
+  const tickerLower = ticker.toLowerCase();
+  seen.add(tickerLower);
+  aliases.push({ ticker, alias: tickerLower, alias_type: "abbreviation", language: "pl" });
 
   // 2. Full official name
   add(name, "official_name");
@@ -72,65 +118,65 @@ function generateAliases(ticker: string, name: string): AliasRow[] {
 
   const baseName = stripped || name;
 
-  // 4. First significant word (if ≥ 3 chars, not a generic prefix)
-  const SKIP_FIRST = new Set(["bank", "grupa", "polska", "polskie", "towarzystwo", "fundusz"]);
+  // 4. First significant word — only if ≥ 5 chars (avoid short ambiguous words)
+  const SKIP_FIRST = new Set(["bank", "grupa", "polska", "polskie", "towarzystwo", "fundusz", "first", "best"]);
   const firstWord  = baseName.split(/\s+/)[0];
-  if (firstWord && firstWord.length >= 3 && !SKIP_FIRST.has(firstWord.toLowerCase())) {
+  if (firstWord && firstWord.length >= 5 && !SKIP_FIRST.has(firstWord.toLowerCase())) {
     add(firstWord, "short_name");
   }
 
   // 5. Without leading "Grupa "
   if (baseName.toLowerCase().startsWith("grupa ")) {
-    add(baseName.slice(6), "short_name");
+    const withoutGrupa = baseName.slice(6);
+    if (withoutGrupa.length >= 5) add(withoutGrupa, "short_name");
   }
 
-  // 6. Acronym from 2–4 word names
+  // 6. Acronym from 2–4 word names — only if ≥ 3 chars and not on blacklist
   const words = baseName.split(/[\s\-\.]+/).filter((w: string) => w.length > 1);
   if (words.length >= 2 && words.length <= 4) {
     const acronym = words.map((w: string) => w[0]).join("").toLowerCase();
-    if (acronym.length >= 2 && acronym !== ticker.toLowerCase()) {
+    // Only add acronym if it's 3+ chars and different from ticker
+    if (acronym.length >= 3 && acronym !== ticker.toLowerCase() && isValidAlias(acronym, ticker)) {
       add(acronym, "abbreviation");
     }
   }
 
   // 7. Manual brand overrides for well-known companies
+  //    Only include unambiguous brand names (4+ chars, not common words)
   const overrides: Record<string, string[]> = {
-    "PKN":  ["orlen", "pkn orlen", "orlen sa", "pknorlen"],
-    "CDR":  ["cd projekt", "cd projekt red", "cdp", "cdprojekt"],
-    "ALE":  ["allegro", "allegro.eu", "allegro eu"],
-    "KGH":  ["kghm", "kghm polska miedz", "kghm polska miedź", "polska miedź"],
-    "PZU":  ["pzu", "powszechny zaklad ubezpieczen", "pzu sa"],
-    "PKO":  ["pko bp", "pko bank polski", "pko bp sa"],
-    "SPL":  ["santander", "santander bank polska", "bank santander", "santander polska"],
+    "PKN":  ["orlen", "pkn orlen", "orlen sa"],
+    "CDR":  ["cd projekt", "cd projekt red", "cdprojekt"],
+    "ALE":  ["allegro", "allegro.eu"],
+    "KGH":  ["kghm", "kghm polska miedz", "kghm polska miedź"],
+    "PZU":  ["pzu sa", "powszechny zaklad ubezpieczen"],
+    "PKO":  ["pko bp", "pko bank polski"],
+    "SPL":  ["santander", "santander bank polska", "santander polska"],
     "MBK":  ["mbank", "mbank sa", "bre bank"],
     "PEO":  ["pekao", "bank pekao", "pekao sa"],
-    "DNP":  ["dino", "dino polska", "dino polska sa"],
-    "LPP":  ["lpp", "lpp sa", "reserved", "cropp"],
-    "CPS":  ["cyfrowy polsat", "polsat", "cyfrowy polsat sa", "plus"],
-    "ALR":  ["amrest", "am rest", "amrest holdings"],
-    "JSW":  ["jsw", "jastrzebska spolka weglowa", "jastrzębska spółka węglowa"],
-    "TEXT": ["text", "text sa", "text software"],
-    "PCO":  ["police", "grupa azoty police", "azoty police"],
-    "ATT":  ["grupa azoty", "azoty", "azoty sa", "azoty tarnów"],
-    "INK":  ["inpost", "inposta", "inpost sa"],
-    "CCC":  ["ccc", "ccc sa", "ccc shoes"],
-    "XTB":  ["xtb", "x-trade brokers", "xtb sa"],
-    "TEN":  ["ten square games", "ten square", "tsq"],
-    "PLW":  ["play", "play communications", "p4"],
-    "VGO":  ["vigo photonics", "vigo", "vigo system"],
-    "OPL":  ["orange polska", "orange", "telekomunikacja polska", "tp sa"],
-    "GTC":  ["gtc", "globe trade centre", "globe trade center"],
-    "EMC":  ["emc", "emc instytut medyczny"],
-    "MRC":  ["mercator", "mercator medical"],
-    "PKP":  ["pkp cargo", "pkp cargo sa"],
-    "GPW":  ["gpw", "gielda papierow wartosciowych", "giełda papierów wartościowych", "warsaw stock exchange", "wse"],
-    "PGE":  ["pge", "polska grupa energetyczna", "pge sa"],
-    "TPE":  ["tauron", "tauron polska energia", "tauron pe"],
-    "BDX":  ["budimex", "budimex sa"],
-    "DOM":  ["dom development", "dom dev"],
-    "ECH":  ["echo", "echo investment"],
-    "SNK":  ["sanok rubber", "sanok"],
-    "ZUE":  ["zue", "zue sa"],
+    "DNP":  ["dino", "dino polska"],
+    "LPP":  ["reserved", "cropp", "mohito"],
+    "CPS":  ["cyfrowy polsat", "polsat", "cyfrowy polsat sa"],
+    "ALR":  ["amrest", "amrest holdings"],
+    "JSW":  ["jastrzebska spolka weglowa", "jastrzębska spółka węglowa"],
+    "PCO":  ["azoty police"],
+    "ATT":  ["azoty tarnów", "azoty tarno"],
+    "INK":  ["inpost", "inpost sa"],
+    "XTB":  ["x-trade brokers"],
+    "TEN":  ["ten square games", "tensquare"],
+    "PLW":  ["play communications", "play polska"],
+    "VGO":  ["vigo photonics", "vigo system"],
+    "OPL":  ["orange polska", "telekomunikacja polska"],
+    "GTC":  ["globe trade centre", "globe trade center"],
+    "EMC":  ["emc instytut medyczny"],
+    "MRC":  ["mercator medical"],
+    "PKP":  ["pkp cargo"],
+    "GPW":  ["giełda papierów wartościowych", "warsaw stock exchange"],
+    "PGE":  ["polska grupa energetyczna"],
+    "TPE":  ["tauron polska energia"],
+    "BDX":  ["budimex"],
+    "DOM":  ["dom development"],
+    "ECH":  ["echo investment"],
+    "SNK":  ["sanok rubber"],
   };
 
   if (overrides[ticker]) {
@@ -151,9 +197,7 @@ async function main() {
   };
 
   // Fetch all companies
-  const compRes = await fetch(`${SUPABASE_URL}/rest/v1/companies?select=ticker,name`, {
-    headers,
-  });
+  const compRes = await fetch(`${SUPABASE_URL}/rest/v1/companies?select=ticker,name`, { headers });
   if (!compRes.ok) {
     console.error("Failed to fetch companies:", compRes.status, await compRes.text());
     process.exit(1);
@@ -166,7 +210,7 @@ async function main() {
   for (const company of companies) {
     allAliases.push(...generateAliases(company.ticker, company.name));
   }
-  console.log(`Wygenerowano ${allAliases.length} aliasów`);
+  console.log(`Wygenerowano ${allAliases.length} aliasów (po filtracji blacklisty)`);
 
   // Upsert in batches of 500
   const BATCH_SIZE = 500;
@@ -195,7 +239,7 @@ async function main() {
     }
   }
 
-  console.log(`\nWysłano: ${sent} wierszy (nowe wstawione + duplikaty pominięte), błędy: ${errors}`);
+  console.log(`\nWysłano: ${sent} wierszy (nowe + pominięte duplikaty), błędy: ${errors}`);
 
   // Final count
   const countRes = await fetch(`${SUPABASE_URL}/rest/v1/ticker_aliases?select=ticker`, {
@@ -203,16 +247,6 @@ async function main() {
   });
   const countHeader = countRes.headers.get("content-range") ?? "?";
   console.log(`\nLiczba aliasów w bazie: ${countHeader}`);
-
-  // Verify TEXT
-  const textRes = await fetch(`${SUPABASE_URL}/rest/v1/ticker_aliases?ticker=eq.TEXT&select=alias,alias_type`, {
-    headers,
-  });
-  const textAliases = (await textRes.json()) as Array<{ alias: string; alias_type: string }>;
-  console.log(`\nAliasy TEXT (${textAliases.length}):`);
-  for (const a of textAliases) {
-    console.log(`  ${a.alias_type.padEnd(15)} ${a.alias}`);
-  }
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
