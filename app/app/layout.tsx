@@ -6,6 +6,7 @@ import GlobalSearch from "./components/GlobalSearch";
 import LeftSidebar  from "./components/LeftSidebar";
 import TickerTape   from "./components/TickerTape";
 import BackToTop    from "./components/BackToTop";
+import { ServiceWorkerRegistration } from "./components/ServiceWorkerRegistration";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,7 +21,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title:       "Giełda Monitor",
   description: "Professional stock monitoring for GPW & USA markets",
-  manifest:    "/manifest.json",
+  manifest:    "/manifest.webmanifest",
   appleWebApp: {
     capable:         true,
     statusBarStyle:  "black-translucent",
@@ -60,6 +61,7 @@ export default function RootLayout({
           </main>
         </div>
         <BackToTop />
+        <ServiceWorkerRegistration />
       </body>
     </html>
   );
