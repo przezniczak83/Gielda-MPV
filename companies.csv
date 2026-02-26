@@ -1,54 +1,176 @@
 ticker,name,sector,market,has_subsidiaries
+06N,06 Magna SA,Manufacturing,GPW,false
 11B,11 bit studios,Gaming,GPW,false
 1AT,Atal SA,RealEstate,GPW,true
+3RG,3R Games SA,Gaming,GPW,false
+4MS,4Mass SA,Technology,GPW,false
+AAT,Alta SA,Finance,GPW,false
+ABE,AB SA,Technology,GPW,true
+ABS,Asseco Business Solutions,Technology,GPW,false
+ACG,AC SA,Automotive,GPW,false
 ACP,Asseco Poland,Technology,GPW,true
 ACT,Action SA,Wholesale,GPW,false
 AGO,Agora SA,Media,GPW,false
 ALE,Allegro,E-commerce,GPW,false
+ALL,Ailleron SA,Technology,GPW,false
 ALR,Alior Bank,Banking,GPW,false
 AMB,Ambra SA,Consumer,GPW,true
 AMC,Amica,Manufacturing,GPW,true
+ANR,Answear.com SA,Retail,GPW,false
+APE,APS Energy SA,Energy,GPW,false
+APN,Aplisens SA,Manufacturing,GPW,false
 APR,Auto Partner SA,Automotive,GPW,false
+APT,Apator SA,Manufacturing,GPW,false
 ARC,Archicom SA,Real Estate,GPW,false
 ARH,Arche SA,Hotels,GPW,false
+ARL,Arlen SA,Other,GPW,false
+ART,Artifex Mundi SA,Gaming,GPW,false
+ASB,ASBIS Enterprises,Technology,GPW,false
+ASE,Asseco SEE,Technology,GPW,true
+ASM,ASM Group SA,Manufacturing,GPW,false
+AST,Astarta Holding,Agriculture,GPW,true
+ATC,Arctic Paper SA,Manufacturing,GPW,true
+ATD,Atende SA,Technology,GPW,false
 ATG,ATM Grupa SA,Media,GPW,false
+ATP,Atlanta Poland SA,FMCG,GPW,false
+ATR,Atrem SA,Construction,GPW,false
+ATS,Atlantis SA,Other,GPW,false
 ATT,Grupa Azoty SA,Chemicals,GPW,true
+AWM,Airway Medix SA,Healthcare,GPW,false
+BBD,BBi Development SA,RealEstate,GPW,false
+BBT,BoomBit SA,Gaming,GPW,false
+BCM,Betacom SA,Technology,GPW,false
+BCS,Big Cheese Studio SA,Gaming,GPW,false
+BCX,Bioceltix SA,Biotech,GPW,false
 BDX,Budimex,Construction,GPW,true
+BFT,Benefit Systems SA,Services,GPW,false
 BGS,Benefit Systems SA,Services,GPW,false
 BHW,Bank Handlowy,Banking,GPW,false
+BIO,Bioton SA,Pharma,GPW,true
+BIP,Bioplanet SA,Biotech,GPW,false
 BLO,Bloober Team SA,Gaming,GPW,false
+BMC,Bumech SA,Mining,GPW,false
+BMX,BioMaxima SA,Healthcare,GPW,false
 BNP,BNP Paribas Bank Polska,Banking,GPW,false
+BOS,Bank Ochrony Środowiska,Banking,GPW,false
+BOW,Bowim SA,Manufacturing,GPW,false
+BRS,Boryszew SA,Manufacturing,GPW,true
 BST,BEST SA,Financial Services,GPW,false
+CAP,Capitea SA,Finance,GPW,false
 CAR,Inter Cars SA,Automotive,GPW,false
+CAV,Cavatina Holding SA,RealEstate,GPW,true
+CBF,Cyberfolks SA,Technology,GPW,false
+CDL,CDRL SA,Retail,GPW,false
 CDR,CD Projekt,Gaming,GPW,false
+CEZ,CEZ,Energy,GPW,true
+CIG,CI Games SA,Gaming,GPW,true
+CLC,Columbus Energy SA,Energy,GPW,false
+CLD,Cloud Technologies SA,Technology,GPW,false
+CLE,Coal Energy SA,Energy,GPW,false
+CLN,CLN Pharma SA,Pharma,GPW,false
+CMP,Comp SA,Technology,GPW,false
 CMR,Comarch,Technology,GPW,true
+COG,Cognor SA,Manufacturing,GPW,false
+CPD,Celtic Property Dev.,RealEstate,GPW,false
+CPI,CPI Europe SA,RealEstate,GPW,true
+CPL,Comperia.pl SA,Finance,GPW,false
+CPR,Compremum SA,Technology,GPW,false
 CPS,Cyfrowy Polsat,Media/Telecom,GPW,true
 CRI,Creotech Instruments,Technology,GPW,false
+CRJ,Creepy Jar SA,Gaming,GPW,false
+CSR,Caspar Asset Management,Finance,GPW,false
+CTX,Captor Therapeutics SA,Biotech,GPW,false
+DAD,Dadelo SA,Retail,GPW,false
 DAT,DataWalk SA,Technology,GPW,false
+DBE,DB Energy SA,Energy,GPW,false
+DCR,Decora SA,Manufacturing,GPW,false
+DEK,Dekpol SA,Construction,GPW,false
+DEL,Delko SA,Automotive,GPW,false
+DGA,DGA SA,Services,GPW,false
+DGE,Dragon Energy SA,Energy,GPW,false
+DIA,Diag SA,Healthcare,GPW,false
+DIG,Digitanet SA,Technology,GPW,false
 DNP,Dino Polska SA,Retail,GPW,false
 DOM,Dom Development,Real Estate,GPW,false
+DTR,Digitree Group SA,Technology,GPW,false
 DVL,Develia SA,Real Estate,GPW,false
+EAH,Esotiq & Henderson SA,Retail,GPW,false
 EAT,AmRest Holdings SE,Consumer,GPW,true
+ECB,ECB SA,Finance,GPW,false
 ECH,Echo Investment,Real Estate,GPW,true
+EKP,Elkop SE,Other,GPW,false
+ELT,Eltrox SA,Manufacturing,GPW,false
 ENA,Enea SA,Energy,GPW,true
+ENE,Enel-Med SA,Healthcare,GPW,false
+ENI,Energoinstal SA,Construction,GPW,false
+ENT,Enter Air SA,Aviation,GPW,false
+EQU,Equnico SA,Other,GPW,false
 ERB,Erbud SA,Construction,GPW,false
+ERG,ERG SA,Manufacturing,GPW,false
+ETL,Eurotel SA,Telecom,GPW,false
+EUR,Eurocash SA,Retail,GPW,true
+FAB,Fabrity Holding SA,Technology,GPW,false
+FEE,Feerum SA,Manufacturing,GPW,false
+FHB,Foodhub SA,Technology,GPW,false
 FMF,Famur SA,Mining Equipment,GPW,true
+FON,Fonon SA,Technology,GPW,false
+FRO,Ferro SA,Manufacturing,GPW,false
+FSG,Fasing SA,Manufacturing,GPW,false
 FTE,Forte SA,Manufacturing,GPW,true
 FTI,Ferro SA,Manufacturing,GPW,false
+GIF,GameFactor SA,Gaming,GPW,false
+GKI,Immobile SA,RealEstate,GPW,true
+GMT,Genomtec SA,Biotech,GPW,false
 GOP,Games Operators SA,Gaming,GPW,false
+GPW,GPW SA,Finance,GPW,false
+GRN,Grodno SA,Technology,GPW,false
 GRP,Graal SA,Food,GPW,false
+GRX,GreenX SA,Energy,GPW,false
 GTC,GTC SA,Real Estate,GPW,true
+GTN,Getin Noble Bank,Banking,GPW,false
+GVT,Virtus SA,Other,GPW,false
+HDR,Hydrotor SA,Manufacturing,GPW,false
 HEJ,Helio SA,Food,GPW,false
+HEL,Helio SA,Food,GPW,false
+HRS,Herkules SA,Construction,GPW,false
 HUG,Huuuge Games,Gaming,GPW,false
+ICE,Medinice SA,Healthcare,GPW,false
+IFI,iFirma SA,Technology,GPW,false
+IMC,IMC SA,Agriculture,GPW,true
+IMP,Imperio SA,RealEstate,GPW,false
+IMS,IMS SA,Technology,GPW,false
+INC,INC SA,Finance,GPW,false
 ING,ING Bank Śląski,Banking,GPW,false
 INK,Inpro SA,Real Estate,GPW,false
+INL,Introl SA,Technology,GPW,false
+INP,Inpro SA,RealEstate,GPW,false
+IPE,Ipopema Securities SA,Finance,GPW,false
+ITB,Interbud-Lublin SA,Construction,GPW,false
+IZO,Izolacja-Jarocin SA,Manufacturing,GPW,false
+IZS,Izostal SA,Manufacturing,GPW,false
+JRH,JRH SA,Other,GPW,false
 JSW,JSW SA,Mining,GPW,false
+KCI,KCI SA,RealEstate,GPW,false
 KER,Kernel,Agriculture,GPW,false
+KGH,KGHM Polska Miedź,Mining,GPW,true
 KGHM,KGHM Polska Miedź,Mining,GPW,true
 KGN,Cognor Holding SA,Manufacturing,GPW,false
+KMP,Kompap SA,Manufacturing,GPW,false
+KOM,Komputronik SA,Retail,GPW,false
+KPL,Kinopol SA,Media,GPW,false
+KRK,Krka SA,Pharma,GPW,true
 KRU,Kruk SA,Finance,GPW,false
+KSG,KSG Agro SA,Agriculture,GPW,false
 KTY,Grupa Kęty,Manufacturing,GPW,true
+LBT,Libet SA,Manufacturing,GPW,false
+LBW,Lubawa SA,Manufacturing,GPW,false
+LEN,Lena Lighting SA,Manufacturing,GPW,false
+LES,Less SA,Other,GPW,false
+LKD,Lokum Deweloper SA,RealEstate,GPW,false
 LPP,LPP SA,Retail,GPW,false
+LRQ,LARQ SA,Finance,GPW,false
+LSI,LSI Software SA,Technology,GPW,false
+LTX,Lentex SA,Manufacturing,GPW,false
 LVC,LiveChat Software,SaaS,GPW,false
 LWB,Lubelski Węgiel Bogdanka,Mining,GPW,false
 MAB,Mabion SA,Biotech,GPW,false
@@ -56,58 +178,160 @@ MAK,Makarony Polskie,Food,GPW,false
 MBK,mBank,Banking,GPW,false
 MBR,MoBruk SA,Environment,GPW,false
 MBW,Magellan SA,Finance,GPW,false
+MCI,MCI Capital SA,Finance,GPW,false
 MDG,Medicalgorithmics SA,Healthcare,GPW,false
+MDI,MDI Energia SA,Energy,GPW,false
 MDV,Modivo SA,Retail,GPW,false
 MED,Medicover,Healthcare,GPW,true
+MEX,Mex Polska SA,Food,GPW,false
+MFO,MFO SA,Manufacturing,GPW,false
+MGT,Mangata Holding SA,Manufacturing,GPW,true
 MID,Mirbud SA,Construction,GPW,false
 MIL,Bank Millennium,Banking,GPW,false
+MIR,Miraculum SA,FMCG,GPW,false
+MLG,MLP Group SA,RealEstate,GPW,true
+MLK,Milkiland SA,Food,GPW,true
+MLS,ML System SA,Technology,GPW,false
+MNC,Mennica Polska SA,Manufacturing,GPW,false
+MOC,Molecure SA,Biotech,GPW,false
+MOJ,MOJ SA,Manufacturing,GPW,false
 MOL,MOL Magyar Olaj,Energy,GPW,true
 MON,Monnari Trade,Retail,GPW,false
+MOV,Movie Games SA,Gaming,GPW,false
+MRB,MoBruk SA,Environment,GPW,false
 MRC,Mercator Medical SA,Healthcare,GPW,false
+MSP,Mostostal Płock SA,Construction,GPW,false
+MSW,Mostostal Warszawa SA,Construction,GPW,false
+MSZ,Mostostal Zabrze SA,Construction,GPW,false
+MUR,Murapol SA,RealEstate,GPW,true
+MVP,Marvipol Development SA,RealEstate,GPW,false
+MZA,Muza SA,Media,GPW,false
 NBR,Netia SA,Telecom,GPW,false
+NCL,Noctiluca SA,Biotech,GPW,false
 NEU,Neuca SA,Healthcare,GPW,true
+NNG,Nanogroup SA,Technology,GPW,false
+NTT,NTT System SA,Technology,GPW,false
+NVA,Panova SA,Other,GPW,false
+NVG,NovaVis Group SA,Technology,GPW,false
 NWG,Newag SA,Rail Vehicles,GPW,false
+NXG,Nexity SA,RealEstate,GPW,false
 OBS,Orbis SA,Hotels,GPW,true
+ODL,Odlewnie Polskie SA,Manufacturing,GPW,false
+OND,Onde SA,Construction,GPW,false
+ONO,OneSano SA,Healthcare,GPW,false
 OPL,Orange Polska,Telecom,GPW,false
+OPM,OpTeam SA,Technology,GPW,false
+OPN,Oponeo.pl SA,Retail,GPW,false
+OTS,OT Logistics SA,Logistics,GPW,true
+PAS,Passus SA,Technology,GPW,false
+PAT,Patentus SA,Manufacturing,GPW,false
+PBX,Pekabex SA,Construction,GPW,false
 PCC,PCC Rokita SA,Chemicals,GPW,false
+PCE,Grupa Azoty Police SA,Chemicals,GPW,false
 PCF,PCF Group SA,Gaming,GPW,false
 PCO,Pepco Group,Retail,GPW,true
+PCR,PCC Rokita SA,Chemicals,GPW,false
+PEN,Photon Energy SA,Energy,GPW,false
 PEO,Bank Pekao,Banking,GPW,true
 PGE,PGE SA,Energy,GPW,true
+PGM,PMPG Polskie Media SA,Media,GPW,false
+PGV,PGF Group SA,Healthcare,GPW,true
 PHN,PHN SA,Real Estate,GPW,false
+PHR,Pharmena SA,Pharma,GPW,false
+PJP,PJP Makrum SA,Manufacturing,GPW,false
 PKN,PKN Orlen,Energy,GPW,true
 PKO,PKO Bank Polski,Banking,GPW,true
 PKP,PKP Cargo,Transport,GPW,true
 PLW,PlayWay,Gaming,GPW,false
+PLZ,Plaza Centers SA,RealEstate,GPW,false
+PPS,Pepees SA,Food,GPW,false
+PRI,Pragma Inkaso SA,Finance,GPW,false
+PRM,Prochem SA,Construction,GPW,false
+PRT,Protektor SA,Manufacturing,GPW,false
+PTG,Poltreg SA,Healthcare,GPW,false
+PTW,PTWP SA,Media,GPW,false
+PUR,Pure Biologics SA,Biotech,GPW,false
+PWX,Polwax SA,Manufacturing,GPW,false
 PXM,Polimex-Mostostal,Construction,GPW,true
 PZU,PZU SA,Insurance,GPW,true
+QNA,QNA Technology SA,Technology,GPW,false
+QRS,Quercus TFI SA,Finance,GPW,false
 RBW,Rainbow Tours,Tourism,GPW,false
+RLP,Relpol SA,Manufacturing,GPW,false
+RMK,Remak-Energomontaż SA,Construction,GPW,false
+RND,Render Frames SA,Technology,GPW,false
+RNK,Rank Progress SA,RealEstate,GPW,false
+RPC,Ropczyce SA,Manufacturing,GPW,false
 RVU,Ryvu Therapeutics,Biotech,GPW,false
+RWL,Rawlplug SA,Manufacturing,GPW,false
 SAN,Santander Bank Polska,Banking,GPW,true
+SCP,SCP Fundusz SA,Finance,GPW,false
+SEK,Seko SA,Manufacturing,GPW,false
+SEL,Selena FM SA,Manufacturing,GPW,true
+SFS,Sfinks Polska SA,Food,GPW,false
+SGN,Sygnity SA,Technology,GPW,false
 SHO,Shoper SA,Technology,GPW,false
+SIM,SimFabric SA,Gaming,GPW,false
+SKA,Śnieżka SA,Manufacturing,GPW,false
+SKH,Skarbiec Holding SA,Finance,GPW,false
+SKL,Skyline Investment SA,RealEstate,GPW,false
 SLV,Selvita SA,Biotech,GPW,false
 SNK,Sanok Rubber Company,Manufacturing,GPW,false
+SNT,Synektik SA,Healthcare,GPW,false
+SNW,Sanwil Holding SA,Manufacturing,GPW,false
+SNX,Sunex SA,Energy,GPW,false
+SON,Sonel SA,Manufacturing,GPW,false
 SPL,Santander Bank Polska SA,Banking,GPW,false
 SPR,Spyrosoft SA,Technology,GPW,false
+STF,Stalprofil SA,Manufacturing,GPW,false
+STP,Stalprodukt SA,Manufacturing,GPW,false
 STX,Stalexport Autostrady,Infrastructure,GPW,false
+SVE,SNT Verse SA,Technology,GPW,false
+SWG,Seco/Warwick SA,Manufacturing,GPW,false
+TAR,Tarczyński SA,Food,GPW,false
 TEN,Ten Square Games,Gaming,GPW,false
 TIM,TIM SA,Wholesale,GPW,false
+TLX,Talex SA,Technology,GPW,false
 TMR,Tatry Mountain Resorts,Tourism,GPW,true
+TOA,Toya SA,Manufacturing,GPW,false
 TOR,Torpol SA,Construction,GPW,false
 TPE,Tauron,Energy,GPW,true
+TRN,Transpol SA,Logistics,GPW,false
+TSG,Tesgas SA,Construction,GPW,false
 TXT,Text,AI/NLP,GPW,false
+UCG,UniCredit,Banking,GPW,true
+ULG,Ula Games SA,Gaming,GPW,false
+ULM,ULMA Construccion Polska,Construction,GPW,false
+UNF,Unfold SA,Technology,GPW,false
 UNI,Unibep SA,Construction,GPW,true
+UNT,Unimot SA,Energy,GPW,false
+URT,UR Testing SA,Services,GPW,false
+VGO,Vigophotonics SA,Technology,GPW,false
+VIN,Vindexus SA,Finance,GPW,false
+VOT,Votum SA,Finance,GPW,false
 VOX,Voxel SA,Healthcare,GPW,false
 VRC,Vercom SA,Technology,GPW,false
+VVD,Vivid Games SA,Gaming,GPW,false
+WAS,Wasko SA,Technology,GPW,false
+WIK,Wikana SA,RealEstate,GPW,false
 WLT,Wielton SA,Manufacturing,GPW,false
 WPL,Wirtualna Polska,Media/Technology,GPW,true
+WPR,Wood & Company,Finance,GPW,false
 WTN,Wittchen SA,Retail,GPW,false
+WXF,Warimpex SA,RealEstate,GPW,false
+XPL,X-Plus SA,Other,GPW,false
 XTB,XTB SA,Finance,GPW,false
+XTP,XTPL SA,Technology,GPW,false
+YAN,Yanosik SA,Technology,GPW,false
+YRL,Yarly SA,Other,GPW,false
 ZAB,Żabka Polska,Retail,GPW,true
 ZAM,Zamet SA,Manufacturing,GPW,false
 ZEP,Zpue SA,Manufacturing,GPW,false
 ZMT,Zamet Industry SA,Manufacturing,GPW,false
 ZPC,Wawel SA,FMCG,GPW,false
+ZRE,Zremb-Chojnice SA,Manufacturing,GPW,false
+ZUE,ZUE SA,Construction,GPW,false
+ZUK,Stąporków SA,Manufacturing,GPW,false
 ZWC,Żywiec Group,FMCG,GPW,true
 AAPL,Apple Inc,Technology,USA,true
 ABNB,Airbnb,Travel,USA,false
