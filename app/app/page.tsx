@@ -2,6 +2,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import TopMovers   from "./components/TopMovers";
 import TodayAlerts from "./components/TodayAlerts";
+import NewsWidget  from "./components/NewsWidget";
 
 export const revalidate = 300; // ISR: 5 minutes
 
@@ -360,6 +361,9 @@ export default async function DashboardPage() {
 
           </div>
         </div>
+
+        {/* ── News Widget (full width) ──────────────────────────────── */}
+        <NewsWidget />
 
       </div>
     </div>

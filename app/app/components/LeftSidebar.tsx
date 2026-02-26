@@ -12,6 +12,7 @@ const links = [
   { href: "/watchlists", label: "Watchlisty",     icon: "⭐" },
   { href: "/calendar",   label: "Kalendarz",      icon: "📅" },
   { href: "/alerts",     label: "Alerty",         icon: "🔔" },
+  { href: "/news",       label: "Newsy",          icon: "📰" },
   { href: "/heatmap",    label: "Heatmapa",       icon: "🌡" },
   { href: "/whatif",     label: "What-If",        icon: "🧪" },
   { href: "/upload",     label: "Wgraj raport",   icon: "📤" },
