@@ -138,6 +138,47 @@ function formatDate(iso: string | null) {
 const TABS = ["Przegląd", "Finanse", "Eventy", "AI Chat"] as const;
 type Tab = typeof TABS[number];
 
+// ── View Presets ─────────────────────────────────────────────────────────────
+
+interface Preset {
+  id:          string;
+  label:       string;
+  description: string;
+  tab:         Tab;
+  scrollTo:    string[];
+}
+
+const PRESETS: Preset[] = [
+  {
+    id:          "morning",
+    label:       "🌅 Przegląd",
+    description: "Cena + Sentiment + Ostatnie eventy",
+    tab:         "Przegląd",
+    scrollTo:    ["terminal-overview", "sentiment-widget"],
+  },
+  {
+    id:          "fundamental",
+    label:       "📊 Fundamenty",
+    description: "Health + MOAT + Finanse + Forecast",
+    tab:         "Finanse",
+    scrollTo:    ["financial-kpis", "moat-widget", "forecast-widget"],
+  },
+  {
+    id:          "due-diligence",
+    label:       "🔍 Due Diligence",
+    description: "Red Flags + Insider + Ownership + Consensus",
+    tab:         "Finanse",
+    scrollTo:    ["moat-widget", "ownership-widget", "consensus-widget"],
+  },
+  {
+    id:          "news",
+    label:       "📰 Aktualności",
+    description: "Eventy + Sentiment + AI Chat",
+    tab:         "Eventy",
+    scrollTo:    ["events-list"],
+  },
+];
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 export default function CompanyTabs({
@@ -151,9 +192,10 @@ export default function CompanyTabs({
   events:       Event[];
   latestPrice:  LatestPrice;
 }) {
-  const [activeTab,  setActiveTab]  = useState<Tab>("Przegląd");
-  const [refreshing, setRefreshing] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState<string | null>(null);
+  const [activeTab,    setActiveTab]    = useState<Tab>("Przegląd");
+  const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [lastRefresh,  setLastRefresh]  = useState<string | null>(null);
 
   // ── Keyboard navigation (1–4 keys) ───────────────────────────────────────
   useEffect(() => {
@@ -171,6 +213,21 @@ export default function CompanyTabs({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  function handlePreset(preset: Preset) {
+    setActivePreset(preset.id);
+    setActiveTab(preset.tab);
+    // After tab renders, scroll to first target element
+    setTimeout(() => {
+      for (const id of preset.scrollTo) {
+        const el = document.getElementById(id);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+          break;
+        }
+      }
+    }, 150);
+  }
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -219,12 +276,33 @@ export default function CompanyTabs({
         </div>
       </div>
 
+      {/* Preset bar */}
+      <div className="mb-3">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] font-mono text-gray-700 mr-1 shrink-0">Widoki:</span>
+          {PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              onClick={() => handlePreset(preset)}
+              title={preset.description}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                activePreset === preset.id
+                  ? "border-blue-500 text-blue-300 bg-blue-500/10"
+                  : "border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+              }`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Tab nav */}
       <div className="flex gap-1 mb-1 border-b border-gray-800 pb-0">
         {TABS.map((tab, i) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => { setActiveTab(tab); setActivePreset(null); }}
             className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors -mb-px border-b-2 ${
               activeTab === tab
                 ? "text-white border-blue-500 bg-gray-900/40"
@@ -244,18 +322,24 @@ export default function CompanyTabs({
       {/* Tab panels */}
       {activeTab === "Przegląd" && (
         <div className="space-y-6">
-          {/* Terminal overview — kompaktowy widok z danymi ze snapshotu */}
-          <TerminalOverview ticker={ticker} />
-
+          <div id="terminal-overview">
+            <TerminalOverview ticker={ticker} />
+          </div>
           <div>
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
               Wykres cen (30 dni)
             </h2>
             <PriceChart ticker={ticker} />
           </div>
-          <HealthOverview ticker={ticker} />
-          <SentimentWidget ticker={ticker} />
-          <OwnershipWidget ticker={ticker} />
+          <div id="health-score">
+            <HealthOverview ticker={ticker} />
+          </div>
+          <div id="sentiment-widget">
+            <SentimentWidget ticker={ticker} />
+          </div>
+          <div id="ownership-widget">
+            <OwnershipWidget ticker={ticker} />
+          </div>
         </div>
       )}
 
@@ -264,11 +348,21 @@ export default function CompanyTabs({
           <div className="flex justify-end">
             <ExportButton href={`/api/export?type=financials&ticker=${ticker}`} label="Eksportuj finansowe CSV" />
           </div>
-          <FinancialKpis ticker={ticker} />
-          <MoatWidget ticker={ticker} sector={sector} />
-          <PeerComparison ticker={ticker} />
-          <ConsensusWidget ticker={ticker} />
-          <ForecastWidget ticker={ticker} />
+          <div id="financial-kpis">
+            <FinancialKpis ticker={ticker} />
+          </div>
+          <div id="moat-widget">
+            <MoatWidget ticker={ticker} sector={sector} />
+          </div>
+          <div id="peer-comparison">
+            <PeerComparison ticker={ticker} />
+          </div>
+          <div id="consensus-widget">
+            <ConsensusWidget ticker={ticker} />
+          </div>
+          <div id="forecast-widget">
+            <ForecastWidget ticker={ticker} />
+          </div>
         </div>
       )}
 
@@ -278,7 +372,9 @@ export default function CompanyTabs({
             <ExportButton href={`/api/export?type=events&ticker=${ticker}`} label="Eksportuj eventy CSV" />
             <ExportButton href={`/api/export?type=prices&ticker=${ticker}`} label="Eksportuj ceny CSV" />
           </div>
-          <EventsList events={events} />
+          <div id="events-list">
+            <EventsList events={events} />
+          </div>
         </div>
       )}
 
