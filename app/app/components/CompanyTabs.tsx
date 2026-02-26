@@ -94,6 +94,14 @@ const CorrelationWidget = dynamic(
   },
 );
 
+const SectorKPIsWidget = dynamic(
+  () => import("./SectorKPIsWidget"),
+  {
+    loading: () => <div className="h-32 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
 type Event = {
@@ -373,6 +381,9 @@ export default function CompanyTabs({
           </div>
           <div id="correlation-widget">
             <CorrelationWidget ticker={ticker} />
+          </div>
+          <div id="sector-kpis-widget">
+            <SectorKPIsWidget ticker={ticker} sector={sector} />
           </div>
         </div>
       )}
