@@ -63,6 +63,7 @@ const BLACKLIST = new Set([
   // Currencies / indices / institutions (not companies)
   "msz", "nbp", "eur", "usd", "pln", "gbp", "chf", "jpy",
   "wig", "wig20", "mwig40", "swig80",
+  "spx", "dax", "cac", "ftse", "nasdaq", "dow",
   // Other ambiguous abbreviations
   "gs", "ab", "pcc", "ons", "ono",
   // Additional false-positive tickers (common words in Polish/English text)

@@ -42,6 +42,7 @@ interface KeyFact {
 interface AIAnalysis {
   tickers:            string[];
   ticker_confidence:  Record<string, number>;
+  relevance_score:    number;
   sector:             string | null;
   sentiment:          number;
   impact_score:       number;
@@ -136,6 +137,15 @@ async function analyzeItem(
     `Jesteś ekspertem analizy finansowej GPW i giełd światowych.
 Analizujesz polskie wiadomości finansowe i zwracasz WYŁĄCZNIE JSON bez markdown.
 
+POLE "relevance_score" — ocena ważności artykułu dla inwestora GPW (0.0–1.0):
+1.0 = Komunikat ESPI / raport regulacyjny spółki GPW
+0.9 = Wyniki finansowe, dywidenda, przejęcie, emisja akcji konkretnej spółki
+0.8 = Istotna informacja o konkretnej spółce (kontrakt, zmiana zarządu, prognoza)
+0.6 = Informacja o spółce w szerszym kontekście / artykuł branżowy
+0.4 = Komentarz makroekonomiczny (stopy, inflacja, PKB) z możliwym wpływem
+0.2 = Artykuł o zagranicznych rynkach / indeksach (SPX, DAX, NASDAQ)
+0.0 = Artykuł całkowicie niezwiązany z inwestowaniem na GPW
+
 KRYTYCZNE ZASADY dla pola "tickers" i "ticker_confidence":
 
 Dodaj ticker WYŁĄCZNIE gdy spełniony jest JEDEN z warunków:
@@ -181,6 +191,7 @@ Zwróć JSON:
 {
   "tickers": [],
   "ticker_confidence": {},
+  "relevance_score": 0.5,
   "sector": "finanse|energetyka|technologia|chemia|handel|nieruchomosci|przemysl|inne",
   "sentiment": 0.0,
   "impact_score": 5,
@@ -257,6 +268,8 @@ Zwróć JSON:
   return {
     tickers:     rawTickers,
     ticker_confidence,
+    relevance_score: typeof parsed.relevance_score === "number"
+      ? Math.max(0, Math.min(1, parsed.relevance_score)) : 0.5,
     sector:      typeof parsed.sector           === "string" ? parsed.sector : null,
     sentiment:   typeof parsed.sentiment        === "number"
       ? Math.max(-1, Math.min(1, parsed.sentiment)) : 0,
@@ -339,6 +352,7 @@ async function processItem(
       category:          "other",
       ai_summary:        item.title.slice(0, 300),
       ticker_confidence: paywallConf,
+      relevance_score:   heurTickers.length > 0 ? 0.5 : 0.3,
     };
     if (heurTickers.length > 0) paywallUpdate.tickers = heurTickers;
     await supabase.from("news_items").update(paywallUpdate).eq("id", item.id);
@@ -400,6 +414,13 @@ async function processItem(
     ai_processed:      true,
     ticker_confidence: mergedConf,
   };
+  // ESPI always has relevance 1.0; for others derive from analysis or heuristic
+  const relevanceScore: number = isEspi
+    ? 1.0
+    : analysis
+      ? analysis.relevance_score
+      : finalTickers.length > 0 ? 0.6 : 0.3;
+
   if (analysis) {
     update.tickers           = finalTickers;
     update.sector            = analysis.sector;
@@ -411,6 +432,7 @@ async function processItem(
     update.topics            = analysis.topics;
     update.is_breaking       = analysis.is_breaking;
     update.impact_assessment = analysis.impact_assessment;
+    update.relevance_score   = relevanceScore;
   } else if (finalTickers.length > 0) {
     update.tickers = finalTickers;
   }

@@ -3,6 +3,7 @@
 //   ?ticker=PKN         — single ticker OR ?ticker=PKN,PZU (comma-separated)
 //   ?source=bankier     — filter by source
 //   ?impact_min=7       — minimum impact_score
+//   ?min_relevance=0.4  — minimum relevance_score (null values pass through)
 //   ?category=earnings  — filter by category
 //   ?breaking=true      — only is_breaking items
 //   ?days=7             — last N days only
@@ -45,6 +46,7 @@ interface DBItem {
   sector:            string | null;
   sentiment:         number | null;
   impact_score:      number | null;
+  relevance_score:   number | null;
   category:          string | null;
   ai_summary:        string | null;
   key_facts:         unknown;
@@ -63,24 +65,25 @@ export async function GET(req: NextRequest) {
   );
 
   const { searchParams } = req.nextUrl;
-  const tickerParam = searchParams.get("ticker");
-  const source      = searchParams.get("source");
-  const impactMin   = searchParams.get("impact_min");
-  const category    = searchParams.get("category");
-  const breaking    = searchParams.get("breaking");
-  const daysParam   = searchParams.get("days");
-  const hasFacts    = searchParams.get("has_facts");
-  const grouped     = searchParams.get("grouped") === "true";
-  const strict      = searchParams.get("strict") === "true";
-  const limit       = Math.min(parseInt(searchParams.get("limit")  ?? "50",  10), 100);
-  const offset      = Math.max(parseInt(searchParams.get("offset") ?? "0",   10), 0);
+  const tickerParam    = searchParams.get("ticker");
+  const source         = searchParams.get("source");
+  const impactMin      = searchParams.get("impact_min");
+  const minRelevance   = searchParams.get("min_relevance");
+  const category       = searchParams.get("category");
+  const breaking       = searchParams.get("breaking");
+  const daysParam      = searchParams.get("days");
+  const hasFacts       = searchParams.get("has_facts");
+  const grouped        = searchParams.get("grouped") === "true";
+  const strict         = searchParams.get("strict") === "true";
+  const limit          = Math.min(parseInt(searchParams.get("limit")  ?? "50",  10), 100);
+  const offset         = Math.max(parseInt(searchParams.get("offset") ?? "0",   10), 0);
 
   // Fetch extra items when grouping (dedup may reduce count)
   const fetchLimit = grouped ? Math.min(limit * 3, 300) : limit;
 
   let query = supabase
     .from("news_items")
-    .select("id, url, title, summary, source, published_at, tickers, sector, sentiment, impact_score, category, ai_summary, key_facts, topics, is_breaking, impact_assessment, ticker_confidence, event_group_id")
+    .select("id, url, title, summary, source, published_at, tickers, sector, sentiment, impact_score, relevance_score, category, ai_summary, key_facts, topics, is_breaking, impact_assessment, ticker_confidence, event_group_id")
     .eq("ai_processed", true)
     .order("published_at", { ascending: false })
     .range(offset, offset + fetchLimit - 1);
@@ -96,9 +99,10 @@ export async function GET(req: NextRequest) {
     query = query.overlaps("tickers", tickers);
   }
 
-  if (source)    query = query.eq("source", source);
-  if (impactMin) query = query.gte("impact_score", parseInt(impactMin, 10));
-  if (category)  query = query.eq("category", category);
+  if (source)       query = query.eq("source", source);
+  if (impactMin)    query = query.gte("impact_score", parseInt(impactMin, 10));
+  if (minRelevance) query = query.or(`relevance_score.gte.${parseFloat(minRelevance)},relevance_score.is.null`);
+  if (category)     query = query.eq("category", category);
   if (breaking === "true") query = query.eq("is_breaking", true);
   if (hasFacts === "true") query = query.neq("key_facts", "[]");
 
