@@ -12,6 +12,7 @@
 // Deploy: supabase functions deploy fetch-espi --project-ref pftgmorsthoezhmojjpg
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { hashUrl }      from "../_shared/hash.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -230,7 +231,37 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   }
 
   const inserted = data?.length ?? 0;
-  console.log(`[fetch-espi] Inserted ${inserted} records ✓`);
+  console.log(`[fetch-espi] Inserted ${inserted} records into raw_ingest ✓`);
+
+  // ── Bridge: also write to news_items (parallel to raw_ingest) ────────────
+  // Skips stub records (they have no real URL)
+  if (sourceUsed !== "stub") {
+    let newsInserted = 0;
+    for (const record of records) {
+      const espiUrl = record.url ?? `espi-${record.ticker}-${record.published_at ?? Date.now()}`;
+      const hash    = await hashUrl(espiUrl);
+
+      const { error: newsErr } = await supabase
+        .from("news_items")
+        .upsert({
+          url_hash:     hash,
+          url:          record.url ?? espiUrl,
+          source_url:   record.url ?? null,
+          title:        record.title,
+          summary:      null,
+          source:       "espi",
+          published_at: record.published_at,
+          tickers:      [record.ticker],
+          category:     "regulatory",
+          impact_score: 8,      // ESPI always high significance
+          ai_processed: false,
+          telegram_sent: false,
+        }, { onConflict: "url_hash", ignoreDuplicates: true });
+
+      if (!newsErr) newsInserted++;
+    }
+    console.log(`[fetch-espi] Bridge: ${newsInserted}/${records.length} inserted into news_items`);
+  }
 
   return new Response(
     JSON.stringify({

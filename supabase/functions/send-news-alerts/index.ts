@@ -76,7 +76,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     .select("id, title, url, source, tickers, sentiment, impact_score, category, ai_summary")
     .eq("ai_processed", true)
     .eq("telegram_sent", false)
-    .or("impact_score.gte.7,and(category.in.(earnings,dividend),impact_score.gte.5)")
+    .or("impact_score.gte.7,is_breaking.eq.true,and(category.in.(earnings,dividend),impact_score.gte.5)")
     .order("published_at", { ascending: false })
     .limit(20);
 

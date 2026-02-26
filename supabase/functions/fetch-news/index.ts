@@ -8,6 +8,7 @@
 // Deploy: supabase functions deploy fetch-news --project-ref pftgmorsthoezhmojjpg
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { hashUrl }      from "../_shared/hash.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -79,15 +80,6 @@ interface ParsedItem {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
-}
-
-/** First 32 hex chars of SHA-256 hash — enough for deduplication. */
-async function hashUrl(url: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(url));
-  return Array.from(new Uint8Array(buf))
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, 32);
 }
 
 /** Extract text content from an XML tag (handles CDATA). */

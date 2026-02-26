@@ -102,6 +102,14 @@ const SectorKPIsWidget = dynamic(
   },
 );
 
+const CompanyTimeline = dynamic(
+  () => import("./CompanyTimeline"),
+  {
+    loading: () => <div className="h-48 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
 type Event = {
@@ -413,6 +421,9 @@ export default function CompanyTabs({
           </div>
           <div id="events-list">
             <EventsList events={events} />
+          </div>
+          <div id="news-timeline">
+            <CompanyTimeline ticker={ticker} />
           </div>
         </div>
       )}
