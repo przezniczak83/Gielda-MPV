@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Nav          from "./components/Nav";
 import GlobalSearch from "./components/GlobalSearch";
+import LeftSidebar  from "./components/LeftSidebar";
 import dynamic      from "next/dynamic";
 
 const TickerTape = dynamic(() => import("./components/TickerTape"), { ssr: false });
@@ -45,10 +46,20 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-950`}
       >
-        <TickerTape />
-        <Nav />
-        <GlobalSearch />
-        {children}
+        {/* Top bar: ticker tape + nav */}
+        <div className="sticky top-0 z-40">
+          <TickerTape />
+          <Nav />
+        </div>
+
+        {/* Body: left sidebar + main content */}
+        <div className="flex">
+          <LeftSidebar />
+          <main className="flex-1 min-w-0">
+            <GlobalSearch />
+            {children}
+          </main>
+        </div>
       </body>
     </html>
   );
