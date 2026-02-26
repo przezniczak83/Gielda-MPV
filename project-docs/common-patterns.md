@@ -1046,3 +1046,108 @@ fetch(`/api/chat-history?ticker=${ticker}`, { method: "DELETE" });
 **Anthropic rule:** Must alternate user/assistant roles. The placeholder assistant message
 after the context block ensures valid format regardless of history state.
 
+
+---
+
+## Hybrid Nav Layout Pattern (2026-02-26)
+
+Three-layer navigation: TickerTape + Nav (top bar) + LeftSidebar (desktop).
+
+```tsx
+// layout.tsx
+<body>
+  <div className="sticky top-0 z-40">
+    <TickerTape />  {/* 32px scrolling price bar — dynamic import, ssr:false */}
+    <Nav />         {/* 56px logo bar + mobile hamburger only */}
+  </div>
+  <div className="flex">
+    <LeftSidebar /> {/* hidden md: sidebar, sticky top-14 h-[calc(100vh-3.5rem)] */}
+    <main className="flex-1 min-w-0">
+      {children}
+    </main>
+  </div>
+  <BackToTop />   {/* fixed bottom-6 right-6, shown after scrollY > 400 */}
+</body>
+```
+
+**TickerTape seamless loop:** Duplicate items array, translate -50%:
+```css
+@keyframes ticker-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+.ticker-tape-track { animation: ticker-scroll 60s linear infinite; width: max-content; }
+.ticker-tape-track:hover { animation-play-state: paused; }
+```
+
+**LeftSidebar collapse:** Toggle `w-52` / `w-14` with `transition-all duration-200`. Show only icons when collapsed.
+
+---
+
+## PriceChart with Time Ranges + Dual Axis (2026-02-26)
+
+```tsx
+// recharts ComposedChart with dual YAxis
+<ComposedChart data={displayData}>
+  <YAxis yAxisId="price"  domain={[minPrice, maxPrice]} width={44} />
+  <YAxis yAxisId="volume" orientation="right" domain={[0, maxVol * 4]} tick={false} width={0} />
+  <Bar    yAxisId="volume" dataKey="volume" fill="#374151" opacity={0.6} radius={[1,1,0,0]} />
+  <Line   yAxisId="price"  dataKey="close"  stroke={lineColor} strokeWidth={2} dot={false} />
+</ComposedChart>
+```
+
+**Volume scale:** `domain={[0, maxVol * 4]}` keeps bars in the bottom 25% of the chart.
+
+**Time ranges:** `RANGES = [{key:"1M",days:30},{key:"3M",days:90},{key:"YTD",ytd:true},...]`
+Use API query param: `?ticker=X&days=90` or `?ticker=X&ytd=1`.
+
+**Performance label:** Show `+2.5% (3M)` — calculates from first to last close in the range.
+
+---
+
+## What-If Scenario Engine Pattern (2026-02-26)
+
+```sql
+CREATE TABLE whatif_scenarios (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name        text NOT NULL,
+  description text,
+  category    text,  -- 'macro', 'sector', 'geopolitical'
+  impacts     jsonb  -- {ticker: {pct_change: -5.2, rationale: "..."}}
+);
+```
+
+**API enrichment:** Fetch company names, merge with JSONB impacts, sort descending:
+```typescript
+const enrichedImpacts = Object.entries(scenario.impacts).map(([ticker, impact]) => ({
+  ticker, name: companyMap[ticker]?.name ?? ticker, ...impact,
+})).sort((a, b) => b.pct_change - a.pct_change);
+```
+
+**UI pattern:** Left panel = scenario list; Right panel = impact grid (gainers/losers).
+Bar width: `Math.min(100, Math.abs(pct_change) * 5)%` — caps at 100%, ~20% change = full bar.
+
+---
+
+## Correlation Heatmap Pattern (2026-02-26)
+
+```typescript
+// API: GET /api/heatmap?tickers=PKN,PKO,...
+// Returns {tickers, matrix: (number|null)[][], risk_clusters, diversifiers}
+```
+
+**Color mapping:**
+```typescript
+function corrToColor(c: number | null): string {
+  if (c >= 0.7)  return "bg-green-600";   // strong positive
+  if (c >= 0.3)  return "bg-emerald-600/50";
+  if (c >= -0.1) return "bg-gray-700";    // no correlation
+  if (c >= -0.5) return "bg-red-600/60";
+  return "bg-red-700";                     // strong negative
+}
+```
+
+**CSS Grid:** Use inline `gridTemplateColumns` (not Tailwind) since N is dynamic:
+```tsx
+<div style={{ display:"grid", gridTemplateColumns: `${cellSize*1.5}px repeat(${n}, ${cellSize}px)`, gap:2, width:"max-content" }}>
+```
+
+**Risk insights:** Pairs with correlation ≥ 0.65 = concentration risk; ≤ -0.2 = diversifiers.
+

@@ -948,3 +948,128 @@ If it should be replaced, use DELETE + INSERT with ON CONFLICT instead of UPDATE
 **Rule:** Before applying any migration that has both DELETE and UPDATE sections,
 grep for overlapping tickers between the two sets.
 
+---
+
+## UI/UX — Hybrid Nav Layout (2026-02-26)
+
+### Tailwind v4 + Next.js App Router: no config file
+
+**Pattern:** Tailwind v4 uses `@import "tailwindcss"` in globals.css — no `tailwind.config.ts` needed.
+All custom CSS (keyframes, custom classes) goes directly in globals.css.
+
+```css
+/* globals.css — add below @import */
+@keyframes ticker-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.ticker-tape-track { animation: ticker-scroll 60s linear infinite; width: max-content; }
+```
+
+---
+
+### TickerTape: double content for seamless loop
+
+**Pattern:** Duplicate items in the array (`[...items, ...items]`) so the CSS scroll animation
+translates exactly 50% — when it hits 100%, it resets to 0% seamlessly:
+```tsx
+const doubled = [...items, ...items];
+// CSS: translateX(-50%) over 60s, then loops
+```
+**Pause on hover:** `.ticker-tape-track:hover { animation-play-state: paused; }`
+
+---
+
+### Hybrid nav layout: TickerTape + Nav + LeftSidebar
+
+**Layout pattern in layout.tsx:**
+```tsx
+<body>
+  {/* Top bar: sticky */}
+  <div className="sticky top-0 z-40">
+    <TickerTape />   {/* 32px bar with scrolling prices */}
+    <Nav />          {/* 56px bar — logo + mobile hamburger only */}
+  </div>
+
+  {/* Body */}
+  <div className="flex">
+    <LeftSidebar />  {/* hidden on mobile, sticky top-14 h-[calc(100vh-3.5rem)] */}
+    <main className="flex-1 min-w-0">
+      {children}
+    </main>
+  </div>
+  <BackToTop />      {/* Fixed button, appears after scrollY > 400 */}
+</body>
+```
+
+**LeftSidebar sticky offset:** `sticky top-14 h-[calc(100vh-3.5rem)]`
+(14 = 56px for top Nav, 3.5rem = 56px = same)
+
+---
+
+### CorrelationMatrix: CSS Grid with dynamic cell size
+
+**Pattern:** Use inline CSS grid (not Tailwind) for the matrix since columns = N (dynamic):
+```tsx
+<div style={{
+  display: "grid",
+  gridTemplateColumns: `${cellSize * 1.5}px repeat(${n}, ${cellSize}px)`,
+  gap: 2,
+  width: "max-content"
+}}>
+```
+**Cell size:** `Math.max(24, Math.min(40, Math.floor(560 / n)))` — auto-shrinks for large N.
+**Tooltip:** Track mouse position relative to container ref, show absolute div.
+
+---
+
+### PriceChart dual-axis with recharts ComposedChart
+
+**Pattern:** Use `ComposedChart` (not `LineChart`) for dual-axis price + volume:
+```tsx
+import { ComposedChart, Line, Bar, YAxis } from "recharts";
+
+<ComposedChart data={data}>
+  <YAxis yAxisId="price" ... />
+  <YAxis yAxisId="volume" orientation="right" tick={false} width={0} domain={[0, maxVol * 4]} />
+  <Bar    yAxisId="volume" dataKey="volume" fill="#374151" opacity={0.6} />
+  <Line   yAxisId="price"  dataKey="close"  stroke={lineColor} strokeWidth={2} />
+</ComposedChart>
+```
+**Volume axis multiplier:** `domain={[0, maxVol * 4]}` — keeps volume bars in bottom 25% of chart.
+**Dynamic line color:** green if period return ≥ 0, red if < 0.
+
+---
+
+### What-If Engine: JSONB impacts column
+
+**Migration pattern:** Store scenario impacts as JSONB:
+```sql
+impacts jsonb  -- {ticker: {pct_change: -5.2, rationale: "..."}}
+```
+**Enrichment in API:** Fetch company names separately, merge with impacts in-memory:
+```typescript
+const enrichedImpacts = Object.entries(scenario.impacts).map(([ticker, impact]) => ({
+  ticker, name: companyMap[ticker]?.name ?? ticker, ...impact,
+})).sort((a, b) => b.pct_change - a.pct_change);
+```
+
+---
+
+### gen-summary: fire-and-forget regeneration with stale return
+
+**Pattern:** When AI summary is > 6h old, trigger EF regeneration asynchronously
+but immediately return the stale data to the client:
+```typescript
+// Trigger async (non-blocking)
+fetch(`${supabaseUrl}/functions/v1/analyze-sentiment`, {
+  method: "POST", headers: {...}, body: JSON.stringify({ ticker }),
+}).catch(() => {});
+
+// Return stale data immediately
+if (cached?.summary) {
+  return Response.json({ ok: true, source: "stale", summary: cached.summary, ... });
+}
+```
+**Pattern name:** "stale-while-revalidate" — applied at application level (not just HTTP caching).
+
