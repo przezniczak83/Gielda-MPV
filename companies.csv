@@ -1,201 +1,197 @@
 ticker,name,sector,market,has_subsidiaries
-PKN,PKN Orlen,Energy,GPW,TRUE
-PZU,PZU SA,Insurance,GPW,TRUE
-KGHM,KGHM Polska Miedź,Mining,GPW,TRUE
-PKO,PKO Bank Polski,Banking,GPW,TRUE
-PGE,PGE SA,Energy,GPW,TRUE
-MDV,Modivo SA,Retail,GPW,FALSE
-CDR,CD Projekt,Gaming,GPW,FALSE
-ACP,Asseco Poland,Technology,GPW,TRUE
-ALR,Alior Bank,Banking,GPW,FALSE
-MBK,mBank,Banking,GPW,FALSE
-LPP,LPP SA,Retail,GPW,FALSE
-JSW,JSW SA,Mining,GPW,FALSE
-DNP,Dino Polska,Retail,GPW,FALSE
-ALE,Allegro,E-commerce,GPW,FALSE
-SPL,Shoper,E-commerce,GPW,FALSE
-VRG,Vercom,Technology,GPW,FALSE
-TXT,Text,AI/NLP,GPW,FALSE
-SFG,Spyrosoft,IT Services,GPW,FALSE
-KER,Kernel,Agriculture,GPW,FALSE
-OPL,Orange Polska,Telecom,GPW,FALSE
-AAPL,Apple Inc,Technology,USA,TRUE
-MSFT,Microsoft,Technology,USA,TRUE
-GOOGL,Google,Technology,USA,TRUE
-AMZN,Amazon,E-commerce,USA,TRUE
-TSLA,Tesla,Automotive,USA,FALSE
-NVDA,NVIDIA,Semiconductors,USA,FALSE
-META,Meta,Social Media,USA,FALSE
-V,Visa,Payments,USA,FALSE
-MA,Mastercard,Payments,USA,FALSE
-PYPL,PayPal,Payments,USA,FALSE
-PKP,PKP Cargo,Transport,GPW,TRUE
-ING,ING Bank Śląski,Banking,GPW,FALSE
-BNP,BNP Paribas Bank Polska,Banking,GPW,FALSE
-KTY,Grupa Kęty,Manufacturing,GPW,TRUE
-AMC,Amica,Manufacturing,GPW,TRUE
-MOL,MOL Group,Energy,GPW,TRUE
-PGN,PGNiG,Energy,GPW,TRUE
-TPE,Tauron,Energy,GPW,TRUE
-ENA,Energa,Energy,GPW,TRUE
-GTC,GTC SA,Real Estate,GPW,TRUE
-PHN,PHN SA,Real Estate,GPW,FALSE
-DOM,Dom Development,Real Estate,GPW,FALSE
-TEN,Ten Square Games,Gaming,GPW,FALSE
-PLW,PlayWay,Gaming,GPW,FALSE
-11B,11 bit studios,Gaming,GPW,FALSE
-CMR,Comarch,Technology,GPW,TRUE
-BDX,Budimex,Construction,GPW,TRUE
-MRC,Mercator Medical,Healthcare,GPW,FALSE
-WSE,Warsaw Stock Exchange,Finance,GPW,FALSE
-SNK,Sanok Rubber Company,Manufacturing,GPW,FALSE
-PEO,Bank Pekao,Banking,GPW,TRUE
-KRU,Kruk SA,Financial Services,GPW,FALSE
-BGS,Benefit Systems,HR/Fitness,GPW,FALSE
-CPS,Cyfrowy Polsat,Media/Telecom,GPW,TRUE
-WPL,Wirtualna Polska,Media/Technology,GPW,TRUE
-AGO,Agora SA,Media,GPW,FALSE
-ATT,Atal SA,Real Estate,GPW,FALSE
-ECH,Echo Investment,Real Estate,GPW,TRUE
-ROB,Robyg SA,Real Estate,GPW,FALSE
-DVL,Develia SA,Real Estate,GPW,FALSE
-RBW,Rainbow Tours,Tourism,GPW,FALSE
-OBS,Orbis SA,Hotels,GPW,TRUE
-FTE,Forte SA,Manufacturing,GPW,TRUE
-WLT,Wielton SA,Manufacturing,GPW,FALSE
-FMF,Famur SA,Mining Equipment,GPW,TRUE
-SLV,Selvita,Biotech,GPW,FALSE
-MAB,Mabion SA,Pharma,GPW,FALSE
-BST,BEST SA,Financial Services,GPW,FALSE
-UNI,Unibep SA,Construction,GPW,TRUE
-TOR,Torpol SA,Construction,GPW,FALSE
-ZWC,Żywiec Group,FMCG,GPW,TRUE
-JPM,JPMorgan Chase,Banking,USA,TRUE
-NFLX,Netflix,Streaming,USA,FALSE
-AMD,AMD,Semiconductors,USA,FALSE
-BAC,Bank of America,Banking,USA,TRUE
-INK,Inpro SA,Real Estate,GPW,FALSE
-ARG,Argo SA,Manufacturing,GPW,FALSE
-OAT,Oat SA,Agriculture,GPW,FALSE
-CAR,Carint SA,Technology,GPW,FALSE
-MON,Monnari Trade,Retail,GPW,FALSE
-WTN,Wittchen SA,Retail,GPW,FALSE
-CIG,Cigames SA,Gaming,GPW,FALSE
-FSG,Fasing SA,Manufacturing,GPW,FALSE
-KAN,Kancelaria Medius,Legal,GPW,FALSE
-MED,Medicover,Healthcare,GPW,TRUE
-EME,EMEA Medical,Healthcare,GPW,FALSE
-LVC,LiveChat Software,SaaS,GPW,FALSE
-HRP,Huuuge Games,Gaming,GPW,FALSE
-TRK,Trakcion SA,Technology,GPW,FALSE
-BML,Bumble SA,Technology,GPW,FALSE
-APE,Apator SA,Manufacturing,GPW,TRUE
-ZEP,Zpue SA,Manufacturing,GPW,FALSE
-GKI,Getin Noble Bank,Banking,GPW,FALSE
-SPOT,Spotify,Streaming,USA,FALSE
-CRM,Salesforce,SaaS,USA,TRUE
-NOW,ServiceNow,SaaS,USA,FALSE
-SNOW,Snowflake,Data/Cloud,USA,FALSE
-PLTR,Palantir,AI/Defense,USA,FALSE
-ARM,ARM Holdings,Semiconductors,USA,FALSE
-ASML,ASML,Semiconductors,USA,FALSE
-TSM,TSMC,Semiconductors,USA,TRUE
-ORCL,Oracle,Enterprise,USA,TRUE
-MIL,Bank Millennium,Banking,GPW,FALSE
-BHW,Bank Handlowy,Banking,GPW,FALSE
-SAN,Santander Bank Polska,Banking,GPW,TRUE
-PXM,Polimex-Mostostal,Construction,GPW,TRUE
-STX,Stalexport Autostrady,Infrastructure,GPW,FALSE
-ZPC,Wawel SA,FMCG,GPW,FALSE
-AMB,AmRest Holdings,Restaurants,GPW,TRUE
-PKM,PKM Duda,Food,GPW,TRUE
-TIM,TIM SA,Wholesale,GPW,FALSE
-KGN,Cognor Holding,Steel,GPW,FALSE
-FTI,Ferro SA,Manufacturing,GPW,FALSE
-MID,Mirbud SA,Construction,GPW,FALSE
-EAT,Eurocash SA,Wholesale,GPW,TRUE
-NBR,Netia SA,Telecom,GPW,FALSE
-HEJ,Helio SA,Food,GPW,FALSE
-INTC,Intel,Semiconductors,USA,TRUE
-IBM,IBM,Technology,USA,TRUE
-QCOM,Qualcomm,Semiconductors,USA,FALSE
-MU,Micron Technology,Semiconductors,USA,FALSE
-ADBE,Adobe,Software,USA,FALSE
-UBER,Uber,Technology,USA,FALSE
-ABNB,Airbnb,Travel,USA,FALSE
-COIN,Coinbase,FinTech,USA,FALSE
-SQ,Block Inc,FinTech,USA,FALSE
-WMT,Walmart,Retail,USA,TRUE
-HD,Home Depot,Retail,USA,FALSE
-NKE,Nike,Consumer,USA,FALSE
-DIS,Disney,Entertainment,USA,TRUE
-AMGN,Amgen,Biotech,USA,FALSE
-JNJ,Johnson & Johnson,Healthcare,USA,TRUE
-PFE,Pfizer,Pharma,USA,FALSE
-MRNA,Moderna,Biotech,USA,FALSE
-BABA,Alibaba,E-commerce,USA,TRUE
-BRK,Berkshire Hathaway,Finance,USA,TRUE
-GS,Goldman Sachs,Banking,USA,TRUE
-MS,Morgan Stanley,Banking,USA,TRUE
-T,AT&T,Telecom,USA,TRUE
-VZ,Verizon,Telecom,USA,TRUE
-XOM,ExxonMobil,Energy,USA,TRUE
-RIVN,Rivian,Automotive,USA,FALSE
-LWB,Lubelski Węgiel Bogdanka,Mining,GPW,FALSE
-ERB,Erbud SA,Construction,GPW,FALSE
-ATG,AutoPartner SA,Automotive,GPW,FALSE
-NWG,Newag SA,Rail Vehicles,GPW,FALSE
-ACT,Action SA,Wholesale,GPW,FALSE
-QNT,Quantum Software,Technology,GPW,FALSE
-RPC,R22 SA,Technology,GPW,FALSE
-GRP,Graal SA,Food,GPW,FALSE
-MDA,Medicalgorithmics,Healthcare,GPW,FALSE
-ZAM,Zamet SA,Manufacturing,GPW,FALSE
-ARH,Arche SA,Hotels,GPW,FALSE
-ARC,Archicom SA,Real Estate,GPW,FALSE
-MWT,Miwi Urmet,Technology,GPW,FALSE
-MAK,Makarony Polskie,Food,GPW,FALSE
-GKP,Games Operators,Gaming,GPW,FALSE
-PHD,PGS Software,IT Services,GPW,FALSE
-KBJ,KBJ SA,IT Services,GPW,FALSE
-COR,Cordia SA,Real Estate,GPW,FALSE
-ZMT,Zamet Industry SA,Manufacturing,GPW,FALSE
-VOX,Voxel SA,Healthcare,GPW,FALSE
-CVX,Chevron,Energy,USA,TRUE
-BA,Boeing,Aerospace,USA,TRUE
-GE,General Electric,Industrial,USA,TRUE
-CAT,Caterpillar,Industrial,USA,FALSE
-DE,Deere & Company,Agriculture,USA,FALSE
-RTX,RTX Corporation,Defense,USA,TRUE
-LMT,Lockheed Martin,Defense,USA,FALSE
-NOC,Northrop Grumman,Defense,USA,FALSE
-UNH,UnitedHealth Group,Healthcare,USA,TRUE
-MRK,Merck & Co,Pharma,USA,FALSE
-BMY,Bristol-Myers Squibb,Pharma,USA,FALSE
-COST,Costco,Retail,USA,FALSE
-TGT,Target,Retail,USA,FALSE
-SBUX,Starbucks,Consumer,USA,FALSE
-MCD,McDonald's,Consumer,USA,TRUE
-KO,Coca-Cola,Consumer,USA,FALSE
-PEP,PepsiCo,Consumer,USA,FALSE
-F,Ford Motor,Automotive,USA,TRUE
-GM,General Motors,Automotive,USA,FALSE
-COP,ConocoPhillips,Energy,USA,FALSE
-ABT,Abbott Laboratories,Medical Devices,USA,FALSE
-GILD,Gilead Sciences,Biotech,USA,FALSE
-AXP,American Express,Finance,USA,FALSE
-BLK,BlackRock,Finance,USA,FALSE
-SCHW,Charles Schwab,Finance,USA,FALSE
-SHOP,Shopify,E-commerce,USA,FALSE
-ZM,Zoom Video,SaaS,USA,FALSE
-CRWD,CrowdStrike,Cybersecurity,USA,FALSE
-PANW,Palo Alto Networks,Cybersecurity,USA,FALSE
-NET,Cloudflare,Infrastructure,USA,FALSE
-DDOG,Datadog,Observability,USA,FALSE
-MDB,MongoDB,Database,USA,FALSE
-HUBS,HubSpot,SaaS,USA,FALSE
-TEAM,Atlassian,SaaS,USA,FALSE
-WDAY,Workday,SaaS,USA,FALSE
-RBLX,Roblox,Gaming,USA,FALSE
-DOCU,DocuSign,SaaS,USA,FALSE
-SNAP,Snap Inc,Social Media,USA,FALSE
+11B,11 bit studios,Gaming,GPW,false
+1AT,Atal SA,RealEstate,GPW,true
+ACP,Asseco Poland,Technology,GPW,true
+ACT,Action SA,Wholesale,GPW,false
+AGO,Agora SA,Media,GPW,false
+ALE,Allegro,E-commerce,GPW,false
+ALR,Alior Bank,Banking,GPW,false
+AMB,Ambra SA,Consumer,GPW,true
+AMC,Amica,Manufacturing,GPW,true
+APR,Auto Partner SA,Automotive,GPW,false
+ARC,Archicom SA,Real Estate,GPW,false
+ARH,Arche SA,Hotels,GPW,false
+ATG,ATM Grupa SA,Media,GPW,false
+ATT,Grupa Azoty SA,Chemicals,GPW,true
+BDX,Budimex,Construction,GPW,true
+BGS,Benefit Systems SA,Services,GPW,false
+BHW,Bank Handlowy,Banking,GPW,false
+BLO,Bloober Team SA,Gaming,GPW,false
+BNP,BNP Paribas Bank Polska,Banking,GPW,false
+BST,BEST SA,Financial Services,GPW,false
+CAR,Inter Cars SA,Automotive,GPW,false
+CDR,CD Projekt,Gaming,GPW,false
+CMR,Comarch,Technology,GPW,true
+CPS,Cyfrowy Polsat,Media/Telecom,GPW,true
+CRI,Creotech Instruments,Technology,GPW,false
+DAT,DataWalk SA,Technology,GPW,false
+DNP,Dino Polska SA,Retail,GPW,false
+DOM,Dom Development,Real Estate,GPW,false
+DVL,Develia SA,Real Estate,GPW,false
+EAT,AmRest Holdings SE,Consumer,GPW,true
+ECH,Echo Investment,Real Estate,GPW,true
+ENA,Enea SA,Energy,GPW,true
+ERB,Erbud SA,Construction,GPW,false
+FMF,Famur SA,Mining Equipment,GPW,true
+FTE,Forte SA,Manufacturing,GPW,true
+FTI,Ferro SA,Manufacturing,GPW,false
+GOP,Games Operators SA,Gaming,GPW,false
+GRP,Graal SA,Food,GPW,false
+GTC,GTC SA,Real Estate,GPW,true
+HEJ,Helio SA,Food,GPW,false
+HUG,Huuuge Games,Gaming,GPW,false
+ING,ING Bank Śląski,Banking,GPW,false
+INK,Inpro SA,Real Estate,GPW,false
+JSW,JSW SA,Mining,GPW,false
+KER,Kernel,Agriculture,GPW,false
+KGHM,KGHM Polska Miedź,Mining,GPW,true
+KGN,Cognor Holding SA,Manufacturing,GPW,false
+KRU,Kruk SA,Finance,GPW,false
+KTY,Grupa Kęty,Manufacturing,GPW,true
+LPP,LPP SA,Retail,GPW,false
+LVC,LiveChat Software,SaaS,GPW,false
+LWB,Lubelski Węgiel Bogdanka,Mining,GPW,false
+MAB,Mabion SA,Biotech,GPW,false
+MAK,Makarony Polskie,Food,GPW,false
+MBK,mBank,Banking,GPW,false
+MBR,MoBruk SA,Environment,GPW,false
+MBW,Magellan SA,Finance,GPW,false
+MDG,Medicalgorithmics SA,Healthcare,GPW,false
+MDV,Modivo SA,Retail,GPW,false
+MED,Medicover,Healthcare,GPW,true
+MID,Mirbud SA,Construction,GPW,false
+MIL,Bank Millennium,Banking,GPW,false
+MOL,MOL Magyar Olaj,Energy,GPW,true
+MON,Monnari Trade,Retail,GPW,false
+MRC,Mercator Medical SA,Healthcare,GPW,false
+NBR,Netia SA,Telecom,GPW,false
+NEU,Neuca SA,Healthcare,GPW,true
+NWG,Newag SA,Rail Vehicles,GPW,false
+OBS,Orbis SA,Hotels,GPW,true
+OPL,Orange Polska,Telecom,GPW,false
+PCC,PCC Rokita SA,Chemicals,GPW,false
+PCF,PCF Group SA,Gaming,GPW,false
+PCO,Pepco Group,Retail,GPW,true
+PEO,Bank Pekao,Banking,GPW,true
+PGE,PGE SA,Energy,GPW,true
+PHN,PHN SA,Real Estate,GPW,false
+PKN,PKN Orlen,Energy,GPW,true
+PKO,PKO Bank Polski,Banking,GPW,true
+PKP,PKP Cargo,Transport,GPW,true
+PLW,PlayWay,Gaming,GPW,false
+PXM,Polimex-Mostostal,Construction,GPW,true
+PZU,PZU SA,Insurance,GPW,true
+RBW,Rainbow Tours,Tourism,GPW,false
+RVU,Ryvu Therapeutics,Biotech,GPW,false
+SAN,Santander Bank Polska,Banking,GPW,true
+SHO,Shoper SA,Technology,GPW,false
+SLV,Selvita SA,Biotech,GPW,false
+SNK,Sanok Rubber Company,Manufacturing,GPW,false
+SPL,Santander Bank Polska SA,Banking,GPW,false
+SPR,Spyrosoft SA,Technology,GPW,false
+STX,Stalexport Autostrady,Infrastructure,GPW,false
+TEN,Ten Square Games,Gaming,GPW,false
+TIM,TIM SA,Wholesale,GPW,false
+TMR,Tatry Mountain Resorts,Tourism,GPW,true
+TOR,Torpol SA,Construction,GPW,false
+TPE,Tauron,Energy,GPW,true
+TXT,Text,AI/NLP,GPW,false
+UNI,Unibep SA,Construction,GPW,true
+VOX,Voxel SA,Healthcare,GPW,false
+VRC,Vercom SA,Technology,GPW,false
+WLT,Wielton SA,Manufacturing,GPW,false
+WPL,Wirtualna Polska,Media/Technology,GPW,true
+WTN,Wittchen SA,Retail,GPW,false
+XTB,XTB SA,Finance,GPW,false
+ZAB,Żabka Polska,Retail,GPW,true
+ZAM,Zamet SA,Manufacturing,GPW,false
+ZEP,Zpue SA,Manufacturing,GPW,false
+ZMT,Zamet Industry SA,Manufacturing,GPW,false
+ZPC,Wawel SA,FMCG,GPW,false
+ZWC,Żywiec Group,FMCG,GPW,true
+AAPL,Apple Inc,Technology,USA,true
+ABNB,Airbnb,Travel,USA,false
+ABT,Abbott Laboratories,Medical Devices,USA,false
+ADBE,Adobe,Software,USA,false
+AMD,AMD,Semiconductors,USA,false
+AMGN,Amgen,Biotech,USA,false
+AMZN,Amazon,E-commerce,USA,true
+ARM,ARM Holdings,Semiconductors,USA,false
+ASML,ASML,Semiconductors,USA,false
+AXP,American Express,Finance,USA,false
+BA,Boeing,Aerospace,USA,true
+BABA,Alibaba,E-commerce,USA,true
+BAC,Bank of America,Banking,USA,true
+BLK,BlackRock,Finance,USA,false
+BMY,Bristol-Myers Squibb,Pharma,USA,false
+BRK,Berkshire Hathaway B,Finance,USA,true
+CAT,Caterpillar,Industrial,USA,false
+COIN,Coinbase,FinTech,USA,false
+COP,ConocoPhillips,Energy,USA,false
+COST,Costco,Retail,USA,false
+CRM,Salesforce,SaaS,USA,true
+CRWD,CrowdStrike,Cybersecurity,USA,false
+CVX,Chevron,Energy,USA,true
+DDOG,Datadog,Observability,USA,false
+DE,Deere & Company,Agriculture,USA,false
+DIS,Disney,Entertainment,USA,true
+DOCU,DocuSign,SaaS,USA,false
+F,Ford Motor,Automotive,USA,true
+GE,General Electric,Industrial,USA,true
+GILD,Gilead Sciences,Biotech,USA,false
+GM,General Motors,Automotive,USA,false
+GOOGL,Google,Technology,USA,true
+GS,Goldman Sachs,Banking,USA,true
+HD,Home Depot,Retail,USA,false
+HUBS,HubSpot,SaaS,USA,false
+IBM,IBM,Technology,USA,true
+INTC,Intel,Semiconductors,USA,true
+JNJ,Johnson & Johnson,Healthcare,USA,true
+JPM,JPMorgan Chase,Banking,USA,true
+KO,Coca-Cola,Consumer,USA,false
+LMT,Lockheed Martin,Defense,USA,false
+MA,Mastercard,Payments,USA,false
+MCD,McDonald's,Consumer,USA,true
+MDB,MongoDB,Database,USA,false
+META,Meta,Social Media,USA,false
+MRK,Merck & Co,Pharma,USA,false
+MRNA,Moderna,Biotech,USA,false
+MS,Morgan Stanley,Banking,USA,true
+MSFT,Microsoft,Technology,USA,true
+MU,Micron Technology,Semiconductors,USA,false
+NET,Cloudflare,Infrastructure,USA,false
+NFLX,Netflix,Streaming,USA,false
+NKE,Nike,Consumer,USA,false
+NOC,Northrop Grumman,Defense,USA,false
+NOW,ServiceNow,SaaS,USA,false
+NVDA,NVIDIA,Semiconductors,USA,false
+ORCL,Oracle,Enterprise,USA,true
+PANW,Palo Alto Networks,Cybersecurity,USA,false
+PEP,PepsiCo,Consumer,USA,false
+PFE,Pfizer,Pharma,USA,false
+PLTR,Palantir,AI/Defense,USA,false
+PYPL,PayPal,Payments,USA,false
+QCOM,Qualcomm,Semiconductors,USA,false
+RBLX,Roblox,Gaming,USA,false
+RIVN,Rivian,Automotive,USA,false
+RTX,RTX Corporation,Defense,USA,true
+SBUX,Starbucks,Consumer,USA,false
+SCHW,Charles Schwab,Finance,USA,false
+SHOP,Shopify,E-commerce,USA,false
+SNAP,Snap Inc,Social Media,USA,false
+SNOW,Snowflake,Data/Cloud,USA,false
+SPOT,Spotify,Streaming,USA,false
+SQ,Block Inc,FinTech,USA,false
+T,AT&T,Telecom,USA,true
+TEAM,Atlassian,SaaS,USA,false
+TGT,Target,Retail,USA,false
+TSLA,Tesla,Automotive,USA,false
+TSM,TSMC,Semiconductors,USA,true
+UBER,Uber,Technology,USA,false
+UNH,UnitedHealth Group,Healthcare,USA,true
+V,Visa,Payments,USA,false
+VZ,Verizon,Telecom,USA,true
+WDAY,Workday,SaaS,USA,false
+WMT,Walmart,Retail,USA,true
+XOM,ExxonMobil,Energy,USA,true
+ZM,Zoom Video,SaaS,USA,false
