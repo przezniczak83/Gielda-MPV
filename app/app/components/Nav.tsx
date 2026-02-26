@@ -11,9 +11,10 @@ const links = [
   { href: "/macro",      label: "Makro"         },
   { href: "/watchlists", label: "Watchlisty"    },
   { href: "/calendar",   label: "Kalendarz"     },
-  { href: "/alerts",     label: "Alerty"        },
-  { href: "/upload",     label: "Wgraj raport"  },
-  { href: "/status",     label: "Status"        },
+  { href: "/alerts",        label: "Alerty"        },
+  { href: "/paper-trading", label: "Paper Trade"   },
+  { href: "/upload",        label: "Wgraj raport"  },
+  { href: "/status",        label: "Status"        },
 ];
 
 interface NavStats {
