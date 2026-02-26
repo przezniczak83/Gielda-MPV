@@ -24,3 +24,18 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* TickerTape scroll animation */
+@keyframes ticker-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.ticker-tape-track {
+  animation: ticker-scroll 60s linear infinite;
+  width: max-content;
+}
+
+.ticker-tape-track:hover {
+  animation-play-state: paused;
+}
