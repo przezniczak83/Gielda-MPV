@@ -826,3 +826,84 @@ const minImpact  = impactRule?.threshold_value ?? 7; // default fallback
 **API route:** `/api/alert-rules` — GET/POST/PATCH/DELETE
 **UI:** Inline toggle (is_active, telegram_enabled) + inline threshold edit + add form
 ```
+
+---
+
+## Compound Alert Rules with Cooldown
+
+**Pattern:** DB-driven alert rules with compound conditions and per-ticker cooldown.
+
+**Schema additions:**
+```sql
+ALTER TABLE alert_rules
+  ADD COLUMN cooldown_hours integer DEFAULT 24,
+  ADD COLUMN conditions jsonb DEFAULT '[]';
+-- Example condition: [{"field":"event_type","op":"=","value":"earnings"}]
+```
+
+**EF evaluation logic:**
+```typescript
+// 1. Evaluate threshold
+function evalThreshold(event, ruleType, op, threshold) { ... }
+// 2. Evaluate compound conditions (AND logic)
+function evalConditions(event, conditions) {
+  for (const cond of conditions ?? []) {
+    if (!check(event[cond.field], cond.op, cond.value)) return false;
+  }
+  return true;
+}
+// 3. Cooldown: fetch last alerted_at per ticker, skip if within cooldown_hours
+const lastAlertedAt = new Map<string, Date>();
+// filled from: SELECT ticker, alerted_at FROM company_events NOT NULL ORDER BY alerted_at DESC
+```
+
+---
+
+## Paper Trading Pattern
+
+**Tables:** `paper_portfolios` (cash_balance) → `paper_trades` (BUY/SELL) + `paper_positions` (qty, avg_cost).
+
+**BUY logic:**
+```
+new_qty = old_qty + qty
+new_invested = old_invested + qty * price
+new_avg_cost = new_invested / new_qty
+new_cash = old_cash - qty * price
+```
+
+**SELL logic:**
+```
+new_qty = old_qty - qty
+sold_invested = old_avg_cost * qty
+new_invested = old_invested - sold_invested
+new_cash = old_cash + qty * price
+if new_qty == 0: DELETE position
+```
+
+**PnL:** `market_value = current_price * qty`, `pnl = market_value - total_invested`
+
+---
+
+## Weekly Report with AI + Telegram
+
+**Pattern:** Cron-triggered EF generates AI report and sends Telegram digest.
+
+```typescript
+// 1. Fetch week's events
+const { data: events } = await supabase.from("company_events")
+  .select(...)
+  .gte("published_at", weekStart)
+  .lte("published_at", weekEnd);
+
+// 2. Generate report
+const content = await callAnthropic("analysis", systemPrompt, [{ role: "user", content: statsText }], 1200);
+
+// 3. Upsert to DB
+await supabase.from("weekly_reports").upsert({ week_start, content, ... }, { onConflict: "week_start" });
+
+// 4. Send Telegram (max 3900 chars)
+await sendTelegram(tgMsg.slice(0, 3900));
+```
+
+**Idempotency:** Check `week_start` unique constraint before generating; `force=true` to regenerate.
+
