@@ -65,6 +65,36 @@ app.get("/prices/gpw/history", requireApiKey, async (req, res) => {
   }
 });
 
+// Batch price history for multiple GPW tickers in one call
+// GET /prices/gpw/batch?tickers=PKN,PKO,PZU&days=30
+app.get("/prices/gpw/batch", requireApiKey, async (req, res) => {
+  const raw  = req.query.tickers?.toString() ?? "";
+  const days = Math.min(parseInt(req.query.days ?? "30", 10) || 30, 365);
+
+  if (!raw) {
+    return res.status(400).json({ ok: false, error: "tickers query param required" });
+  }
+
+  const tickers = raw.toUpperCase().split(",").map(t => t.trim()).filter(Boolean).slice(0, 60);
+
+  const results = [];
+  for (let i = 0; i < tickers.length; i++) {
+    const ticker = tickers[i];
+    if (i > 0) await new Promise(r => setTimeout(r, 120));
+
+    try {
+      const data = await fetchStooqHistory(ticker, days);
+      results.push({ ticker, ok: true, data });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[prices/gpw/batch] ${ticker}: ${msg}`);
+      results.push({ ticker, ok: false, error: msg, data: [] });
+    }
+  }
+
+  return res.json({ ok: true, count: results.length, results });
+});
+
 // Insider transactions from GPW
 // GET /insider
 app.get("/insider", requireApiKey, async (_req, res) => {

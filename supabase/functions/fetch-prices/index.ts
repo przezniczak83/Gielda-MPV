@@ -36,8 +36,8 @@ type FetcherFn = (ticker: string) => Promise<OHLCV[]>;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MAX_TICKERS_PER_RUN  = 5;
-const SLEEP_BETWEEN_TICKERS = 300;   // ms
+const MAX_TICKERS_PER_RUN   = 30;
+const SLEEP_BETWEEN_TICKERS = 150;   // ms — reduced; Railway batch handles most GPW
 const SLEEP_BETWEEN_SOURCES = 500;   // ms — between failed source attempts
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -95,6 +95,49 @@ async function fetchRailwayGPW(ticker: string): Promise<OHLCV[]> {
     close:  r.close,
     volume: r.volume,
   }));
+}
+
+// ─── Railway/Stooq — batch endpoint (all GPW tickers in one call) ────────────
+
+async function fetchRailwayBatch(tickers: string[]): Promise<Map<string, OHLCV[]>> {
+  const baseUrl = Deno.env.get("RAILWAY_SCRAPER_URL") ?? "";
+  const apiKey  = Deno.env.get("RAILWAY_SCRAPER_KEY") ?? "";
+  if (!baseUrl) throw new Error("RAILWAY_SCRAPER_URL not set");
+
+  const url = `${baseUrl}/prices/gpw/batch?tickers=${encodeURIComponent(tickers.join(","))}&days=30`;
+  const res  = await fetch(url, {
+    headers: { "X-API-Key": apiKey },
+    signal:  AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) throw new Error(`Railway batch returned ${res.status}`);
+
+  const json = await res.json() as {
+    ok:      boolean;
+    count:   number;
+    results: Array<{
+      ticker: string;
+      ok:     boolean;
+      data?:  Array<{ date: string; close: number | null; volume: number | null }>;
+      error?: string;
+    }>;
+  };
+
+  if (!json.ok) throw new Error("Railway batch error");
+
+  const map = new Map<string, OHLCV[]>();
+  for (const r of json.results ?? []) {
+    if (r.ok && r.data?.length) {
+      map.set(r.ticker, r.data.map(d => ({
+        date:   d.date,
+        open:   null,
+        high:   null,
+        low:    null,
+        close:  d.close,
+        volume: d.volume,
+      })));
+    }
+  }
+  return map;
 }
 
 // ─── Twelve Data (GPW: {ticker}.WAR, USA: {ticker}) ──────────────────────────
@@ -394,8 +437,50 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     );
   }
 
-  // ── Process batch ──────────────────────────────────────────────────────────
-  const batch = allCompanies.slice(0, MAX_TICKERS_PER_RUN);
+  // ── Rotating offset (ensures all 400+ companies get fetched over time) ──────
+  const { data: configRow } = await supabase
+    .from("system_config")
+    .select("value")
+    .eq("key", "fetch_prices_offset")
+    .single();
+
+  const total         = allCompanies.length;
+  const currentOffset = (parseInt(configRow?.value ?? "0", 10) || 0) % total;
+  const nextOffset    = (currentOffset + MAX_TICKERS_PER_RUN) % total;
+
+  // Build circular batch (wrap around end of list)
+  let batch: typeof allCompanies;
+  if (currentOffset + MAX_TICKERS_PER_RUN <= total) {
+    batch = allCompanies.slice(currentOffset, currentOffset + MAX_TICKERS_PER_RUN);
+  } else {
+    batch = [
+      ...allCompanies.slice(currentOffset),
+      ...allCompanies.slice(0, (currentOffset + MAX_TICKERS_PER_RUN) % total),
+    ];
+  }
+
+  console.log(`[fetch-prices] offset=${currentOffset}→${nextOffset}, batch=${batch.length} tickers`);
+
+  // Persist next offset immediately (before processing, so a crash doesn't replay same batch)
+  await supabase
+    .from("system_config")
+    .upsert({ key: "fetch_prices_offset", value: String(nextOffset), updated_at: new Date().toISOString() });
+
+  // ── Railway batch for all GPW tickers in one HTTP call ────────────────────
+  const gpwBatch = batch.filter(c => c.market === "GPW").map(c => c.ticker);
+  const batchMap = new Map<string, OHLCV[]>();
+
+  if (gpwBatch.length > 0) {
+    try {
+      const fetched = await fetchRailwayBatch(gpwBatch);
+      for (const [t, rows] of fetched) batchMap.set(t, rows);
+      console.log(`[fetch-prices] Railway batch: ${fetched.size}/${gpwBatch.length} tickers fetched`);
+    } catch (err) {
+      console.warn(`[fetch-prices] Railway batch failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  // ── Process each ticker ────────────────────────────────────────────────────
   const results: Array<{ ticker: string; rows_upserted: number; source_used: string }> = [];
   let totalRows = 0;
 
@@ -403,7 +488,20 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     const { ticker, market } = batch[i];
     if (i > 0) await sleep(SLEEP_BETWEEN_TICKERS);
 
-    const { rows: ohlcvRows, sourceUsed } = await fetchWithFallback(ticker, market);
+    // GPW: use batch result if available, else fall back to individual chain
+    let ohlcvRows: OHLCV[];
+    let sourceUsed: string;
+
+    if (market === "GPW" && batchMap.has(ticker)) {
+      ohlcvRows  = batchMap.get(ticker)!;
+      sourceUsed = "railway_batch";
+      console.log(`[fetch-prices] ${ticker}: railway_batch (${ohlcvRows.length} rows)`);
+    } else {
+      const res = await fetchWithFallback(ticker, market);
+      ohlcvRows  = res.rows;
+      sourceUsed = res.sourceUsed;
+    }
+
     if (ohlcvRows.length === 0) {
       results.push({ ticker, rows_upserted: 0, source_used: "none" });
       continue;
@@ -435,10 +533,12 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
   return new Response(
     JSON.stringify({
-      ok:         true,
+      ok:          true,
       results,
-      total_rows: totalRows,
-      ts:         new Date().toISOString(),
+      total_rows:  totalRows,
+      offset_from: currentOffset,
+      offset_to:   nextOffset,
+      ts:          new Date().toISOString(),
     }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
