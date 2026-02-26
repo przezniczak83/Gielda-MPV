@@ -114,7 +114,6 @@ export default async function DashboardPage() {
   const showMorningBrief = warsawHour >= 6 && warsawHour < 12;
 
   const [
-    { count: companyCount },
     { count: eventsTodayCount },
     { count: alertsTodayCount },
     { data: lastEventData },
@@ -124,8 +123,10 @@ export default async function DashboardPage() {
     { count: morningAlertsCount },
     { count: morningCalendarCount },
     { count: morningRecsCount },
+    { count: news24hCount },
+    { count: breakingCount },
+    { data: avgSentimentData },
   ] = await Promise.all([
-    supabase.from("companies").select("*", { count: "exact", head: true }),
     supabase.from("company_events").select("*", { count: "exact", head: true }).gt("created_at", oneDayAgo),
     supabase.from("company_events").select("*", { count: "exact", head: true }).gt("alerted_at", todayStart),
     supabase.from("company_events").select("created_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
@@ -152,9 +153,23 @@ export default async function DashboardPage() {
       .lte("event_date", new Date(Date.now() + 48 * 3600 * 1000).toISOString()),
     supabase.from("analyst_forecasts").select("*", { count: "exact", head: true })
       .gte("created_at", oneDayAgo),
+    // News stats (24h)
+    supabase.from("news_items").select("*", { count: "exact", head: true })
+      .eq("ai_processed", true).gte("published_at", oneDayAgo),
+    supabase.from("news_items").select("*", { count: "exact", head: true })
+      .eq("ai_processed", true).eq("is_breaking", true).gte("published_at", oneDayAgo),
+    supabase.from("news_items").select("sentiment")
+      .eq("ai_processed", true).gte("published_at", oneDayAgo)
+      .not("sentiment", "is", null).limit(200),
   ]);
 
   const lastUpdated = lastEventData?.created_at ?? null;
+
+  // Compute avg sentiment from news last 24h
+  const sentimentValues = (avgSentimentData ?? []).map((r: { sentiment: number | null }) => r.sentiment).filter((s): s is number => s !== null);
+  const avgNewsSentiment = sentimentValues.length > 0
+    ? sentimentValues.reduce((a, b) => a + b, 0) / sentimentValues.length
+    : null;
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -215,10 +230,14 @@ export default async function DashboardPage() {
 
         {/* ── Stats bar ─────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <StatCard label="Spółki w bazie"    value={companyCount     ?? 0} />
-          <StatCard label="Eventy (24h)"      value={eventsTodayCount ?? 0} accent />
-          <StatCard label="Alerty dziś"       value={alertsTodayCount ?? 0} accent />
-          <StatCard label="Ostatni event"     value={formatDate(lastUpdated)} isText />
+          <StatCard label="Newsy (24h)"   value={news24hCount     ?? 0} accent />
+          <StatCard label="Breaking (24h)" value={breakingCount   ?? 0} accent={!!breakingCount && breakingCount > 0} danger={!!breakingCount && breakingCount > 0} />
+          <StatCard label="Sentiment (24h)" value={
+            avgNewsSentiment !== null
+              ? `${avgNewsSentiment > 0 ? "+" : ""}${avgNewsSentiment.toFixed(2)}`
+              : "—"
+          } isText sentimentVal={avgNewsSentiment} />
+          <StatCard label="Alerty dziś"   value={alertsTodayCount ?? 0} accent />
         </div>
 
         {/* ── 4-Quadrant Command Center ─────────────────────────────── */}
@@ -377,16 +396,34 @@ function StatCard({
   value,
   accent = false,
   isText = false,
+  danger = false,
+  sentimentVal,
 }: {
-  label:    string;
-  value:    string | number;
-  accent?:  boolean;
-  isText?:  boolean;
+  label:         string;
+  value:         string | number;
+  accent?:       boolean;
+  isText?:       boolean;
+  danger?:       boolean;
+  sentimentVal?: number | null;
 }) {
+  const sentimentColor =
+    sentimentVal === undefined || sentimentVal === null ? "text-gray-200"
+    : sentimentVal > 0.3  ? "text-emerald-400"
+    : sentimentVal < -0.3 ? "text-red-400"
+    : "text-yellow-400";
+
+  const textColor =
+    sentimentVal !== undefined  ? sentimentColor
+    : danger                    ? "text-red-400"
+    : accent                    ? "text-blue-400"
+    : "text-white";
+
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-4 py-3">
+    <div className={`rounded-xl border bg-gray-900/40 px-4 py-3 ${
+      danger ? "border-red-900/30" : "border-gray-800"
+    }`}>
       <div className="text-xs text-gray-500 font-medium mb-1">{label}</div>
-      <div className={`font-bold tabular-nums ${isText ? "text-base text-gray-200" : "text-2xl"} ${accent ? "text-blue-400" : "text-white"}`}>
+      <div className={`font-bold tabular-nums ${isText ? "text-base" : "text-2xl"} ${textColor}`}>
         {value}
       </div>
     </div>

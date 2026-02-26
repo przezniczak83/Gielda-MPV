@@ -176,7 +176,7 @@ function formatDate(iso: string | null) {
 
 // ── Tab definitions ─────────────────────────────────────────────────────────
 
-const TABS = ["Przegląd", "Finanse", "Eventy", "AI Chat"] as const;
+const TABS = ["Przegląd", "Finanse", "Eventy", "Wiadomości", "AI Chat"] as const;
 type Tab = typeof TABS[number];
 
 // ── View Presets ─────────────────────────────────────────────────────────────
@@ -213,10 +213,10 @@ const PRESETS: Preset[] = [
   },
   {
     id:          "news",
-    label:       "📰 Aktualności",
-    description: "Eventy + Sentiment + AI Chat",
-    tab:         "Eventy",
-    scrollTo:    ["events-list"],
+    label:       "📰 Wiadomości",
+    description: "ESPI + Newsy prasowe dla spółki",
+    tab:         "Wiadomości",
+    scrollTo:    ["news-timeline-tab"],
   },
 ];
 
@@ -238,7 +238,7 @@ export default function CompanyTabs({
   const [refreshing,   setRefreshing]   = useState(false);
   const [lastRefresh,  setLastRefresh]  = useState<string | null>(null);
 
-  // ── Keyboard navigation (1–4 keys) ───────────────────────────────────────
+  // ── Keyboard navigation (1–5 keys) ───────────────────────────────────────
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement)  return;
@@ -247,7 +247,8 @@ export default function CompanyTabs({
         "1": "Przegląd",
         "2": "Finanse",
         "3": "Eventy",
-        "4": "AI Chat",
+        "4": "Wiadomości",
+        "5": "AI Chat",
       };
       if (tabMap[e.key]) setActiveTab(tabMap[e.key]);
     }
@@ -357,7 +358,7 @@ export default function CompanyTabs({
       </div>
       {/* Keyboard hint */}
       <p className="text-[10px] font-mono text-gray-700 mb-5 pl-1">
-        Klawisze: [1] Przegląd · [2] Finanse · [3] Eventy · [4] AI Chat
+        Klawisze: [1] Przegląd · [2] Finanse · [3] Eventy · [4] Wiadomości · [5] AI Chat
       </p>
 
       {/* Tab panels */}
@@ -425,6 +426,12 @@ export default function CompanyTabs({
           <div id="news-timeline">
             <CompanyTimeline ticker={ticker} />
           </div>
+        </div>
+      )}
+
+      {activeTab === "Wiadomości" && (
+        <div id="news-timeline-tab">
+          <CompanyTimeline ticker={ticker} />
         </div>
       )}
 
