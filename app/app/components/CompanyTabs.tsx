@@ -86,6 +86,14 @@ const TerminalOverview = dynamic(
   },
 );
 
+const CorrelationWidget = dynamic(
+  () => import("./CorrelationWidget"),
+  {
+    loading: () => <div className="h-36 bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
 type Event = {
@@ -362,6 +370,9 @@ export default function CompanyTabs({
           </div>
           <div id="forecast-widget">
             <ForecastWidget ticker={ticker} />
+          </div>
+          <div id="correlation-widget">
+            <CorrelationWidget ticker={ticker} />
           </div>
         </div>
       )}
