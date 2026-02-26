@@ -141,3 +141,61 @@ T,AT&T,Telecom,USA,TRUE
 VZ,Verizon,Telecom,USA,TRUE
 XOM,ExxonMobil,Energy,USA,TRUE
 RIVN,Rivian,Automotive,USA,FALSE
+LWB,Lubelski Węgiel Bogdanka,Mining,GPW,FALSE
+ERB,Erbud SA,Construction,GPW,FALSE
+ATG,AutoPartner SA,Automotive,GPW,FALSE
+NWG,Newag SA,Rail Vehicles,GPW,FALSE
+ACT,Action SA,Wholesale,GPW,FALSE
+QNT,Quantum Software,Technology,GPW,FALSE
+RPC,R22 SA,Technology,GPW,FALSE
+GRP,Graal SA,Food,GPW,FALSE
+MDA,Medicalgorithmics,Healthcare,GPW,FALSE
+ZAM,Zamet SA,Manufacturing,GPW,FALSE
+ARH,Arche SA,Hotels,GPW,FALSE
+ARC,Archicom SA,Real Estate,GPW,FALSE
+MWT,Miwi Urmet,Technology,GPW,FALSE
+MAK,Makarony Polskie,Food,GPW,FALSE
+GKP,Games Operators,Gaming,GPW,FALSE
+PHD,PGS Software,IT Services,GPW,FALSE
+KBJ,KBJ SA,IT Services,GPW,FALSE
+COR,Cordia SA,Real Estate,GPW,FALSE
+ZMT,Zamet Industry SA,Manufacturing,GPW,FALSE
+VOX,Voxel SA,Healthcare,GPW,FALSE
+CVX,Chevron,Energy,USA,TRUE
+BA,Boeing,Aerospace,USA,TRUE
+GE,General Electric,Industrial,USA,TRUE
+CAT,Caterpillar,Industrial,USA,FALSE
+DE,Deere & Company,Agriculture,USA,FALSE
+RTX,RTX Corporation,Defense,USA,TRUE
+LMT,Lockheed Martin,Defense,USA,FALSE
+NOC,Northrop Grumman,Defense,USA,FALSE
+UNH,UnitedHealth Group,Healthcare,USA,TRUE
+MRK,Merck & Co,Pharma,USA,FALSE
+BMY,Bristol-Myers Squibb,Pharma,USA,FALSE
+COST,Costco,Retail,USA,FALSE
+TGT,Target,Retail,USA,FALSE
+SBUX,Starbucks,Consumer,USA,FALSE
+MCD,McDonald's,Consumer,USA,TRUE
+KO,Coca-Cola,Consumer,USA,FALSE
+PEP,PepsiCo,Consumer,USA,FALSE
+F,Ford Motor,Automotive,USA,TRUE
+GM,General Motors,Automotive,USA,FALSE
+COP,ConocoPhillips,Energy,USA,FALSE
+ABT,Abbott Laboratories,Medical Devices,USA,FALSE
+GILD,Gilead Sciences,Biotech,USA,FALSE
+AXP,American Express,Finance,USA,FALSE
+BLK,BlackRock,Finance,USA,FALSE
+SCHW,Charles Schwab,Finance,USA,FALSE
+SHOP,Shopify,E-commerce,USA,FALSE
+ZM,Zoom Video,SaaS,USA,FALSE
+CRWD,CrowdStrike,Cybersecurity,USA,FALSE
+PANW,Palo Alto Networks,Cybersecurity,USA,FALSE
+NET,Cloudflare,Infrastructure,USA,FALSE
+DDOG,Datadog,Observability,USA,FALSE
+MDB,MongoDB,Database,USA,FALSE
+HUBS,HubSpot,SaaS,USA,FALSE
+TEAM,Atlassian,SaaS,USA,FALSE
+WDAY,Workday,SaaS,USA,FALSE
+RBLX,Roblox,Gaming,USA,FALSE
+DOCU,DocuSign,SaaS,USA,FALSE
+SNAP,Snap Inc,Social Media,USA,FALSE
