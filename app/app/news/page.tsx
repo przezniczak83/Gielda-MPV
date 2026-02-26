@@ -29,17 +29,28 @@ interface StatsData {
   by_category:  Record<string, number>;
 }
 
-const SOURCES    = ["pap", "bankier", "stooq", "strefa", "wp", "youtube", "espi"] as const;
+const SOURCES = [
+  "pap", "bankier", "stooq", "strefa", "wp", "youtube", "espi",
+  "gpw", "knf", "money", "pb", "parkiet", "rp", "cashless", "comparic",
+] as const;
 const CATEGORIES = ["earnings", "dividend", "management", "macro", "regulation", "merger", "contract", "insider", "other"] as const;
 
 const SOURCE_COLORS: Record<string, string> = {
-  pap:     "bg-blue-900 text-blue-300 border-blue-800",
-  bankier: "bg-orange-900 text-orange-300 border-orange-800",
-  stooq:   "bg-purple-900 text-purple-300 border-purple-800",
-  strefa:  "bg-green-900 text-green-300 border-green-800",
-  wp:      "bg-red-900 text-red-300 border-red-800",
-  youtube: "bg-pink-900 text-pink-300 border-pink-800",
-  espi:    "bg-amber-900 text-amber-300 border-amber-800",
+  pap:      "bg-blue-900 text-blue-300 border-blue-800",
+  bankier:  "bg-orange-900 text-orange-300 border-orange-800",
+  stooq:    "bg-purple-900 text-purple-300 border-purple-800",
+  strefa:   "bg-green-900 text-green-300 border-green-800",
+  wp:       "bg-red-900 text-red-300 border-red-800",
+  youtube:  "bg-pink-900 text-pink-300 border-pink-800",
+  espi:     "bg-amber-900 text-amber-300 border-amber-800",
+  gpw:      "bg-green-900/40 text-green-300 border-green-700",
+  knf:      "bg-yellow-900/40 text-yellow-300 border-yellow-700",
+  money:    "bg-orange-900/40 text-orange-300 border-orange-700",
+  pb:       "bg-cyan-900/40 text-cyan-300 border-cyan-700",
+  parkiet:  "bg-blue-900/40 text-blue-300 border-blue-700",
+  rp:       "bg-slate-700/40 text-slate-300 border-slate-600",
+  cashless: "bg-teal-900/40 text-teal-300 border-teal-700",
+  comparic: "bg-violet-900/40 text-violet-300 border-violet-700",
 };
 
 function timeAgo(iso: string | null): string {

@@ -26,7 +26,7 @@ export async function GET() {
   ] = await Promise.all([
     supabase
       .from("ingestion_log")
-      .select("function_name, status, items_fetched, items_processed, items_failed, error_message, created_at")
+      .select("source_name, status, messages_fetched, messages_new, messages_failed, error_details, created_at")
       .order("created_at", { ascending: false })
       .limit(20),
     supabase.from("news_items").select("*", { count: "exact", head: true }).gte("created_at", since24h),
@@ -46,6 +46,17 @@ export async function GET() {
     return NextResponse.json({ error: logErr.message }, { status: 500 });
   }
 
+  // Normalize log rows to a consistent shape for the frontend
+  const log = (logRows ?? []).map(r => ({
+    function_name:   (r as Record<string, unknown>).source_name     as string,
+    status:          (r as Record<string, unknown>).status           as string,
+    items_fetched:   (r as Record<string, unknown>).messages_fetched as number | null,
+    items_processed: (r as Record<string, unknown>).messages_new     as number | null,
+    items_failed:    (r as Record<string, unknown>).messages_failed  as number | null,
+    error_message:   ((r as Record<string, unknown>).error_details as { message?: string } | null)?.message ?? null,
+    created_at:      (r as Record<string, unknown>).created_at       as string,
+  }));
+
   return NextResponse.json({
     pipeline: {
       total_24h:     total24h    ?? 0,
@@ -54,7 +65,7 @@ export async function GET() {
       pending_ai:    pending     ?? 0,
     },
     breaking_24h: breakingRows ?? [],
-    log:          logRows      ?? [],
-    ts:           new Date().toISOString(),
+    log,
+    ts: new Date().toISOString(),
   });
 }

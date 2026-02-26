@@ -50,6 +50,9 @@ interface AIAnalysis {
 const BATCH_SIZE    = 20;
 const SLEEP_BETWEEN = 200; // ms between OpenAI calls
 
+// Sources with paywalled content — skip AI if summary is too short
+const PAYWALL_SOURCES = ["rp", "parkiet", "pb"];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
@@ -262,6 +265,21 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
     // Heuristic pre-extraction using alias map
     const preExtracted = extractTickersHeuristic(item.title, item.summary, aliasMap);
+
+    // Paywall filter — skip AI for paywalled sources with no body content
+    if (PAYWALL_SOURCES.includes(item.source) && (!item.summary || item.summary.length < 100)) {
+      const paywallUpdate: Record<string, unknown> = {
+        ai_processed: true,
+        impact_score: 3,
+        category:     "other",
+        ai_summary:   item.title.slice(0, 300),
+      };
+      if (preExtracted.length > 0) paywallUpdate.tickers = preExtracted;
+      await supabase.from("news_items").update(paywallUpdate).eq("id", item.id);
+      processed++;
+      console.log(`[process-news] item ${item.id}: paywall skip (${item.source})`);
+      continue;
+    }
 
     let analysis: AIAnalysis | null = null;
     try {

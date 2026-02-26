@@ -18,13 +18,21 @@ interface NewsItem {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  pap:     "bg-blue-900/60 text-blue-300",
-  bankier: "bg-orange-900/60 text-orange-300",
-  stooq:   "bg-purple-900/60 text-purple-300",
-  strefa:  "bg-green-900/60 text-green-300",
-  wp:      "bg-red-900/60 text-red-300",
-  youtube: "bg-pink-900/60 text-pink-300",
-  espi:    "bg-amber-900/60 text-amber-300",
+  pap:      "bg-blue-900/60 text-blue-300",
+  bankier:  "bg-orange-900/60 text-orange-300",
+  stooq:    "bg-purple-900/60 text-purple-300",
+  strefa:   "bg-green-900/60 text-green-300",
+  wp:       "bg-red-900/60 text-red-300",
+  youtube:  "bg-pink-900/60 text-pink-300",
+  espi:     "bg-amber-900/60 text-amber-300",
+  gpw:      "bg-green-900/40 text-green-300",
+  knf:      "bg-yellow-900/40 text-yellow-300",
+  money:    "bg-orange-900/40 text-orange-300",
+  pb:       "bg-cyan-900/40 text-cyan-300",
+  parkiet:  "bg-blue-900/40 text-blue-300",
+  rp:       "bg-slate-700/40 text-slate-300",
+  cashless: "bg-teal-900/40 text-teal-300",
+  comparic: "bg-violet-900/40 text-violet-300",
 };
 
 function sentimentBar(s: number | null) {

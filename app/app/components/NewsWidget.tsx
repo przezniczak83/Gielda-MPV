@@ -21,13 +21,21 @@ interface NewsItem {
 type Filter = "all" | "high" | "ticker";
 
 const SOURCE_COLORS: Record<string, string> = {
-  pap:     "bg-blue-900 text-blue-300",
-  bankier: "bg-orange-900 text-orange-300",
-  stooq:   "bg-purple-900 text-purple-300",
-  strefa:  "bg-green-900 text-green-300",
-  wp:      "bg-red-900 text-red-300",
-  youtube: "bg-pink-900 text-pink-300",
-  espi:    "bg-amber-900 text-amber-300",  // ESPI — regulatory, amber
+  pap:      "bg-blue-900 text-blue-300",
+  bankier:  "bg-orange-900 text-orange-300",
+  stooq:    "bg-purple-900 text-purple-300",
+  strefa:   "bg-green-900 text-green-300",
+  wp:       "bg-red-900 text-red-300",
+  youtube:  "bg-pink-900 text-pink-300",
+  espi:     "bg-amber-900 text-amber-300",
+  gpw:      "bg-green-900/40 text-green-300",
+  knf:      "bg-yellow-900/40 text-yellow-300",
+  money:    "bg-orange-900/40 text-orange-300",
+  pb:       "bg-cyan-900/40 text-cyan-300",
+  parkiet:  "bg-blue-900/40 text-blue-300",
+  rp:       "bg-slate-700/40 text-slate-300",
+  cashless: "bg-teal-900/40 text-teal-300",
+  comparic: "bg-violet-900/40 text-violet-300",
 };
 
 function timeAgo(iso: string | null): string {
