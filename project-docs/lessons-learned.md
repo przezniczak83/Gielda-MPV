@@ -521,6 +521,82 @@ const minImpact  = impactRule?.threshold_value ?? DEFAULT_MIN_IMPACT; // 7
 
 ---
 
+## UX Patterns — Terminal / Bloomberg Style
+
+### 2026-02-26 — Preset views: tab + scrollTo pattern
+
+**Problem:** Users need quick entry points into specific widget combinations
+(e.g., "show me fundamentals" → jump to Finanse tab + scroll to financial-kpis).
+
+**Pattern:**
+```typescript
+const PRESETS = [
+  { id: "fundamental", label: "📊 Fundamenty", tab: "Finanse", scrollTo: ["financial-kpis", "moat-widget"] },
+  // ...
+];
+
+function handlePreset(preset) {
+  setActivePreset(preset.id);
+  setActiveTab(preset.tab);
+  setTimeout(() => {
+    for (const id of preset.scrollTo) {
+      const el = document.getElementById(id);
+      if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); break; }
+    }
+  }, 150); // wait for tab re-render
+}
+```
+
+**UX rules:**
+- Clicking a tab directly should clear the active preset (setActivePreset(null))
+- Use 150ms timeout to give React time to render the new tab before scrolling
+- Wrap key sections in `<div id="...">` inside the tab panels (not in individual components)
+
+---
+
+### 2026-02-26 — LiveTimestamp: relative time with stale warning
+
+**Pattern:** Client component that updates every 60s and shows yellow ⚠ when stale.
+
+```typescript
+export function LiveTimestamp({ date, prefix = "aktualizacja", staleAfter = 3_600_000 }) {
+  const [label, setLabel] = useState("");
+  useEffect(() => {
+    if (!date) { setLabel("brak danych"); return; }
+    const update = () => { /* compute relative time */ setLabel(...) };
+    update();
+    const id = setInterval(update, 60_000);
+    return () => clearInterval(id);
+  }, [date]);
+  const isStale = !date || (Date.now() - new Date(date).getTime()) > staleAfter;
+  return <span className={isStale ? "text-yellow-500/70" : "text-gray-600"}>· {prefix} {label} {isStale && "⚠"}</span>;
+}
+```
+
+**Usage:** Add directly in section headers: `<h3>Title <LiveTimestamp date={kpi?.calculated_at} prefix="analiza" /></h3>`
+
+**PriceChart LIVE badge:** `isLive = lastPoint && diff < 48h` → green pulsing dot.
+
+---
+
+### 2026-02-26 — Morning Brief: server-side time-gating for dashboard widget
+
+**Pattern:** ISR dashboard page computes `warsawHour` server-side and passes to render.
+Since ISR revalidates every 5 min, the widget appears/disappears within 5 min of 06:00/12:00.
+
+```typescript
+const warsawHour = parseInt(
+  new Date().toLocaleString("en-US", { hour: "numeric", hour12: false, timeZone: "Europe/Warsaw" }),
+  10,
+);
+const showMorningBrief = warsawHour >= 6 && warsawHour < 12;
+```
+
+**Data strategy:** Include morning counts (alerts_last_12h, calendar_today, recs_24h) in the
+existing parallel `Promise.all()` at the top of the page — no extra request round-trip.
+
+---
+
 ## Next.js — Server + Client Wrapper Pattern
 
 ### 2026-02-25 — Server component fetches ISR data, client wrapper adds interactivity

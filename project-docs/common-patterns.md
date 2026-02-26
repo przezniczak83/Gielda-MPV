@@ -713,6 +713,83 @@ async function fetchFREDSeries(
 
 ---
 
+## LiveTimestamp Component
+
+Reusable client component for relative timestamps with stale detection.
+
+```tsx
+// import { LiveTimestamp } from "./LiveTimestamp";
+
+<LiveTimestamp
+  date={kpi?.calculated_at}  // ISO string or null
+  prefix="analiza"           // shown before the relative time
+  staleAfter={3_600_000}     // ms (default: 1h) — after this: yellow + ⚠
+/>
+```
+
+**Usage locations:** Section headers in widgets (MoatWidget, FinancialKpis, ForecastWidget,
+ConsensusWidget, SentimentWidget) and after price display in TerminalOverview.
+
+**PriceChart LIVE badge:**
+```tsx
+const isLive = lastPoint && (Date.now() - new Date(lastPoint.date).getTime()) < 48 * 3600_000;
+{isLive && (
+  <span className="flex items-center gap-1 text-xs text-green-400 font-mono">
+    <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+    LIVE
+  </span>
+)}
+```
+
+---
+
+## Preset Views Pattern
+
+```typescript
+const PRESETS = [
+  { id: "morning",       label: "🌅 Przegląd",   tab: "Przegląd", scrollTo: ["terminal-overview"] },
+  { id: "fundamental",   label: "📊 Fundamenty", tab: "Finanse",  scrollTo: ["financial-kpis", "moat-widget"] },
+  { id: "due-diligence", label: "🔍 Due Diligence", tab: "Finanse", scrollTo: ["moat-widget", "ownership-widget"] },
+  { id: "news",          label: "📰 Aktualności", tab: "Eventy",  scrollTo: ["events-list"] },
+];
+
+function handlePreset(preset) {
+  setActivePreset(preset.id);
+  setActiveTab(preset.tab);
+  setTimeout(() => {
+    for (const id of preset.scrollTo) {
+      const el = document.getElementById(id);
+      if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); break; }
+    }
+  }, 150);
+}
+```
+
+**IDs:** Add `<div id="...">` wrappers around sections **in CompanyTabs**, not in individual widgets.
+This avoids prop-drilling IDs through lazy-loaded components.
+
+---
+
+## Morning Brief Aggregation Pattern
+
+```typescript
+// In Edge Function: collect last 12h data in parallel
+const [alertsRes, calendarRes, recsRes, macroRes] = await Promise.all([
+  supabase.from("company_events").select("...").gte("published_at", since).gte("impact_score", 6).limit(5),
+  supabase.from("calendar_events").select("...").gte("event_date", now).lte("event_date", tomorrow).limit(5),
+  supabase.from("analyst_forecasts").select("...").gte("created_at", since).limit(3),
+  supabase.from("macro_indicators").select("name, value, change_pct, fetched_at").in("name", [...]).limit(8),
+]);
+```
+
+**Message format:** Use `━` separators between sections. Skip empty sections except alerts
+(always show "Spokojna noc" when no alerts). Macro always shown if data available.
+
+**Dashboard widget:** Time-gate with `warsawHour >= 6 && warsawHour < 12`. Compute in ISR
+server component — accurate within ISR revalidation window (5 min).
+
+---
+
 ## Configurable Alert Rules Pattern
 
 Schema + API for DB-driven alert thresholds:
