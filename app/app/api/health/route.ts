@@ -10,6 +10,7 @@ const EDGE_FUNCTIONS = [
   "analyze-moat", "gen-forecast", "calc-multiples",
   "fetch-insider", "fetch-ownership", "fetch-sec",
   "ai-query", "extract-pdf", "process-dm-pdf",
+  "analyze-impact",
 ];
 
 // Staleness thresholds

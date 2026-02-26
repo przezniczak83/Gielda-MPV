@@ -2,6 +2,16 @@
 
 import { useEffect, useState } from "react";
 
+interface ImpactRow {
+  event_type:       string;
+  sample_count:     number;
+  avg_impact_score: number | null;
+  positive_pct:     number | null;
+  high_impact_pct:  number | null;
+  top_tickers:      Array<{ ticker: string; count: number; avg_score: number }> | null;
+  computed_at:      string | null;
+}
+
 interface HealthData {
   ok:      boolean;
   ts:      string;
@@ -68,6 +78,7 @@ export default function StatusPage() {
   const [data,    setData]    = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(false);
+  const [impact,  setImpact]  = useState<ImpactRow[]>([]);
 
   function load() {
     setLoading(true);
@@ -75,6 +86,10 @@ export default function StatusPage() {
       .then(r => r.json())
       .then((d: HealthData) => { setData(d); setLoading(false); })
       .catch(() => { setError(true); setLoading(false); });
+    fetch("/api/event-impact")
+      .then(r => r.json())
+      .then((d: ImpactRow[]) => { if (Array.isArray(d)) setImpact(d); })
+      .catch(() => { /* non-critical */ });
   }
 
   useEffect(() => { load(); }, []);
@@ -192,6 +207,55 @@ export default function StatusPage() {
                 </div>
               </div>
             </div>
+
+            {/* ── Event Impact Analysis ──────────────────────────────────── */}
+            {impact.length > 0 && (
+              <div>
+                <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+                  Event Impact Analysis
+                </h2>
+                <div className="rounded-xl border border-gray-800 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-gray-600 uppercase tracking-wider">
+                        <th className="px-4 py-2 text-left font-medium">Typ eventu</th>
+                        <th className="px-4 py-2 text-right font-medium">Próbki</th>
+                        <th className="px-4 py-2 text-right font-medium">Śr. impact</th>
+                        <th className="px-4 py-2 text-right font-medium">% pozytywnych</th>
+                        <th className="px-4 py-2 text-right font-medium">% wysokich</th>
+                        <th className="px-4 py-2 text-left font-medium hidden sm:table-cell">Top spółki</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/50">
+                      {impact.map(row => (
+                        <tr key={row.event_type} className="hover:bg-gray-800/30 transition-colors">
+                          <td className="px-4 py-2.5 font-mono text-gray-300">{row.event_type}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">{row.sample_count}</td>
+                          <td className={`px-4 py-2.5 text-right tabular-nums font-bold ${
+                            (row.avg_impact_score ?? 0) >= 7 ? "text-green-400"
+                            : (row.avg_impact_score ?? 0) >= 4 ? "text-yellow-400"
+                            : "text-gray-400"
+                          }`}>
+                            {row.avg_impact_score !== null ? row.avg_impact_score.toFixed(1) : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">
+                            {row.positive_pct !== null ? `${row.positive_pct.toFixed(0)}%` : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">
+                            {row.high_impact_pct !== null ? `${row.high_impact_pct.toFixed(0)}%` : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 hidden sm:table-cell">
+                            <span className="text-gray-600 font-mono">
+                              {(row.top_tickers ?? []).slice(0, 3).map(t => t.ticker).join(", ")}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* ── Supabase link ──────────────────────────────────────────── */}
             <div className="text-center pt-2">
