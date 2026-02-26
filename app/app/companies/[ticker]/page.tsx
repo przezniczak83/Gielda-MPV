@@ -135,6 +135,12 @@ function CompanyPageLayout({
               {market}
             </span>
             <FavoriteButton ticker={ticker} />
+            <Link
+              href={`/reports/${ticker}`}
+              className="text-xs px-2.5 py-1 rounded-md bg-blue-900/40 hover:bg-blue-900/60 text-blue-400 border border-blue-800/50 transition-colors"
+            >
+              📄 Raport AI
+            </Link>
           </div>
           <div className="mt-2 text-xl text-gray-300 font-medium">{name}</div>
           {sector && (
