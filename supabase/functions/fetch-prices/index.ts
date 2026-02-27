@@ -298,7 +298,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   console.log(`[fetch-prices] ${batchKey} done — fetched=${fetched} failed=${failed} status=${batchStatus}`);
 
   // ── Checkpoint: price_fetch_batches ────────────────────────────────────────
-  await supabase.from("price_fetch_batches").upsert({
+  const { error: batchErr } = await supabase.from("price_fetch_batches").upsert({
     batch_key:     batchKey,
     tickers:       batchTickers,
     last_run_at:   finishedAt,
@@ -311,6 +311,11 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       failed_tickers: failedTickers.slice(0, 20),
     },
   }, { onConflict: "batch_key" });
+  if (batchErr) {
+    console.error("[fetch-prices] price_fetch_batches upsert failed:", batchErr.message);
+  } else {
+    console.log(`[fetch-prices] price_fetch_batches upsert OK (${batchKey})`);
+  }
 
   // ── Pipeline run — finish ──────────────────────────────────────────────────
   if (runId) {
