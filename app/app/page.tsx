@@ -1,8 +1,16 @@
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 import TopMovers   from "./components/TopMovers";
 import TodayAlerts from "./components/TodayAlerts";
 import NewsWidget  from "./components/NewsWidget";
+
+function db() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+    { auth: { persistSession: false } },
+  );
+}
 
 export const revalidate = 300; // ISR: 5 minutes
 
@@ -113,6 +121,8 @@ export default async function DashboardPage() {
   );
   const showMorningBrief = warsawHour >= 6 && warsawHour < 12;
 
+  const client = db();
+
   const [
     { count: eventsTodayCount },
     { count: alertsTodayCount },
@@ -127,38 +137,38 @@ export default async function DashboardPage() {
     { count: breakingCount },
     { data: avgSentimentData },
   ] = await Promise.all([
-    supabase.from("company_events").select("*", { count: "exact", head: true }).gt("created_at", oneDayAgo),
-    supabase.from("company_events").select("*", { count: "exact", head: true }).gt("alerted_at", todayStart),
-    supabase.from("company_events").select("created_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    supabase
+    client.from("company_events").select("*", { count: "exact", head: true }).gt("created_at", oneDayAgo),
+    client.from("company_events").select("*", { count: "exact", head: true }).gt("alerted_at", todayStart),
+    client.from("company_events").select("created_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    client
       .from("company_events")
       .select("ticker, title, event_type, impact_score, published_at")
       .order("created_at", { ascending: false })
       .limit(15),
-    supabase
+    client
       .from("early_recommendations")
       .select("ticker, recommendation, target_price, received_at")
       .order("received_at", { ascending: false })
       .limit(5),
-    supabase
+    client
       .from("calendar_events")
       .select("ticker, event_type, event_date, title")
       .gte("event_date", todayStart)
       .order("event_date", { ascending: true })
       .limit(6),
-    supabase.from("company_events").select("*", { count: "exact", head: true })
+    client.from("company_events").select("*", { count: "exact", head: true })
       .gte("published_at", twelveHAgo).gte("impact_score", 6),
-    supabase.from("calendar_events").select("*", { count: "exact", head: true })
+    client.from("calendar_events").select("*", { count: "exact", head: true })
       .gte("event_date", todayStart)
       .lte("event_date", new Date(Date.now() + 48 * 3600 * 1000).toISOString()),
-    supabase.from("analyst_forecasts").select("*", { count: "exact", head: true })
+    client.from("analyst_forecasts").select("*", { count: "exact", head: true })
       .gte("created_at", oneDayAgo),
     // News stats (24h)
-    supabase.from("news_items").select("*", { count: "exact", head: true })
+    client.from("news_items").select("*", { count: "exact", head: true })
       .eq("ai_processed", true).gte("published_at", oneDayAgo),
-    supabase.from("news_items").select("*", { count: "exact", head: true })
+    client.from("news_items").select("*", { count: "exact", head: true })
       .eq("ai_processed", true).eq("is_breaking", true).gte("published_at", oneDayAgo),
-    supabase.from("news_items").select("sentiment")
+    client.from("news_items").select("sentiment")
       .eq("ai_processed", true).gte("published_at", oneDayAgo)
       .not("sentiment", "is", null).limit(200),
   ]);
