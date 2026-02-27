@@ -647,15 +647,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (fetchErr) {
     await supabase.from("pipeline_runs").insert({
       function_name: "process-news",
+      source:        "gpt-4o-mini",
       started_at:    startedAt,
       finished_at:   new Date().toISOString(),
       status:        "failed",
       items_in:      0,
       items_out:     0,
       errors:        1,
-      error_message: fetchErr.message,
-      details:       { model: "gpt-4o-mini" },
-    }).catch(() => {});
+      details:       { model: "gpt-4o-mini", error: fetchErr.message },
+    }).catch(err => console.error("[process-news] pipeline_runs insert error:", err));
     return new Response(
       JSON.stringify({ ok: false, error: fetchErr.message }),
       { status: 500, headers: { "Content-Type": "application/json" } },
@@ -668,6 +668,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (batch.length === 0) {
     await supabase.from("pipeline_runs").insert({
       function_name: "process-news",
+      source:        "gpt-4o-mini",
       started_at:    startedAt,
       finished_at:   new Date().toISOString(),
       status:        "success",
@@ -675,7 +676,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       items_out:     0,
       errors:        0,
       details:       { model: "gpt-4o-mini" },
-    }).catch(() => {});
+    }).catch(err => console.error("[process-news] pipeline_runs insert error:", err));
     return new Response(
       JSON.stringify({ ok: true, processed: 0, failed: 0, ts: new Date().toISOString() }),
       { status: 200, headers: { "Content-Type": "application/json" } },
@@ -725,14 +726,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   await supabase.from("pipeline_runs").insert({
     function_name: "process-news",
+    source:        "gpt-4o-mini",
     started_at:    startedAt,
     finished_at:   doneAt,
-    status:        failed === 0 ? "success" : "partial",
+    status:        failed === 0 ? "success" : "failed",
     items_in:      batch.length,
     items_out:     processed,
     errors:        failed,
     details:       { model: "gpt-4o-mini" },
-  }).catch(() => {});
+  }).catch(err => console.error("[process-news] pipeline_runs insert error:", err));
 
   await supabase.from("system_health").upsert({
     function_name:        "process-news",
@@ -762,15 +764,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     console.error("[process-news] Fatal:", errMsg);
     await supabase.from("pipeline_runs").insert({
       function_name: "process-news",
+      source:        "gpt-4o-mini",
       started_at:    startedAt,
       finished_at:   failAt,
       status:        "failed",
       items_in:      0,
       items_out:     0,
       errors:        1,
-      error_message: errMsg,
-      details:       { model: "gpt-4o-mini" },
-    }).catch(() => {});
+      details:       { model: "gpt-4o-mini", error: errMsg },
+    }).catch(err => console.error("[process-news] pipeline_runs insert error:", err));
     await supabase.from("system_health").upsert({
       function_name: "process-news",
       last_error:    errMsg,
