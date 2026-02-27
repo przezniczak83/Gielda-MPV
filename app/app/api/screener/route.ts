@@ -111,13 +111,13 @@ export async function POST(req: NextRequest) {
 
   if (health_min !== undefined) {
     rows = rows.filter(r => {
-      const h = r.snapshot.kpis?.health_score ?? null;
+      const h = r.snapshot.health_score ?? null;
       return h !== null && h >= health_min;
     });
   }
   if (health_max !== undefined) {
     rows = rows.filter(r => {
-      const h = r.snapshot.kpis?.health_score ?? null;
+      const h = r.snapshot.health_score ?? null;
       return h !== null && h <= health_max;
     });
   }
@@ -137,13 +137,13 @@ export async function POST(req: NextRequest) {
 
   if (change_min !== undefined) {
     rows = rows.filter(r => {
-      const c = r.snapshot.change_pct ?? null;
+      const c = r.snapshot.price?.change_pct ?? null;
       return c !== null && c >= change_min;
     });
   }
   if (change_max !== undefined) {
     rows = rows.filter(r => {
-      const c = r.snapshot.change_pct ?? null;
+      const c = r.snapshot.price?.change_pct ?? null;
       return c !== null && c <= change_max;
     });
   }
