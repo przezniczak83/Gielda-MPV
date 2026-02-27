@@ -84,7 +84,7 @@ export default function UploadPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
-      <div className="max-w-xl mx-auto px-6 py-12">
+      <div className="max-w-xl mx-auto px-4 py-8 md:px-6 md:py-12">
 
         <Link
           href="/"

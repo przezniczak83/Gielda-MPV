@@ -138,7 +138,7 @@ export default function StatusPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
-      <div className="max-w-5xl mx-auto px-6 py-10 space-y-10">
+      <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-10 space-y-10">
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between gap-4 flex-wrap">

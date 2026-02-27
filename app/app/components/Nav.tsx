@@ -24,7 +24,7 @@ export default function Nav() {
   const [open, setOpen] = useState(false);
 
   return (
-    <nav className="bg-gray-900 border-b border-gray-800 h-14 flex items-center">
+    <nav className="relative bg-gray-900 border-b border-gray-800 h-14 flex items-center">
       <div className="w-full px-4 md:px-6 flex items-center justify-between">
         {/* Logo */}
         <Link

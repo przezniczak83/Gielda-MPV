@@ -125,7 +125,7 @@ function CompanyPageLayout({
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
-      <div className="max-w-4xl mx-auto px-6 py-10">
+      <div className="max-w-4xl mx-auto px-4 py-6 md:px-6 md:py-10">
 
         {/* Breadcrumb */}
         <nav className="flex items-center gap-1.5 text-xs text-gray-600 mb-6">
@@ -156,7 +156,7 @@ function CompanyPageLayout({
 
           {/* Row 1: ticker + market badge + indices + actions */}
           <div className="flex items-center gap-2.5 flex-wrap">
-            <h1 className="text-5xl font-bold font-mono text-white tracking-tight">
+            <h1 className="text-3xl md:text-5xl font-bold font-mono text-white tracking-tight">
               {ticker}
             </h1>
             <span className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 font-mono">
@@ -190,7 +190,7 @@ function CompanyPageLayout({
           {/* Row 3: price + change */}
           {latestPrice && (
             <div className="flex items-baseline gap-3">
-              <span className="text-3xl font-bold text-white tabular-nums">
+              <span className="text-2xl md:text-3xl font-bold text-white tabular-nums">
                 {Number(latestPrice.close).toFixed(2)} PLN
               </span>
               {priceChangePct !== null && (

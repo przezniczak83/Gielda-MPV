@@ -10,7 +10,7 @@ export const metadata = {
 export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
-      <div className="max-w-3xl mx-auto px-6 py-10">
+      <div className="max-w-3xl mx-auto px-4 py-6 md:px-6 md:py-10">
 
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-white">Ustawienia</h1>

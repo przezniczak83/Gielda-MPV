@@ -47,7 +47,7 @@ export default async function ReportPage({ params }: PageProps) {
         <hr className="border-gray-300 my-2" />
       </div>
 
-      <div className="max-w-3xl mx-auto px-6 py-10">
+      <div className="max-w-3xl mx-auto px-4 py-6 md:px-6 md:py-10">
         {/* Header */}
         <div className="mb-6 print:hidden">
           <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">

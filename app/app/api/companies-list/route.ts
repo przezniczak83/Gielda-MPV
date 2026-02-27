@@ -17,9 +17,10 @@ export async function GET() {
   const { data, error } = await supabase
     .from("companies")
     .select(`
-      ticker, name, official_name, sector, market,
+      ticker, name, official_name, sector, market, indices,
       last_price, change_1d, price_updated_at,
       health_score, rs_score, rs_trend,
+      description, ceo, headquarters, website, ir_url,
       last_news_at, avg_sentiment_30d, news_count_30d
     `)
     .order("market")

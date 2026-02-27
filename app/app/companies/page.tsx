@@ -116,7 +116,7 @@ export default function CompaniesPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-950 text-gray-100">
-        <div className="max-w-5xl mx-auto px-6 py-10">
+        <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-10">
           <div className="h-8 w-48 bg-gray-800/50 rounded animate-pulse mb-6" />
           <div className="space-y-2">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -138,7 +138,7 @@ export default function CompaniesPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
-      <div className="max-w-5xl mx-auto px-6 py-10">
+      <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-10">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-white">Spółki</h1>
           <p className="text-gray-500 mt-1 text-sm">{all.length} spółek w bazie</p>

@@ -273,12 +273,12 @@ export default function CompanyTabs({
       </div>
 
       {/* Tab nav */}
-      <div className="flex gap-1 mb-1 border-b border-gray-800 pb-0">
+      <div className="flex gap-1 mb-1 border-b border-gray-800 pb-0 overflow-x-auto scrollbar-none">
         {TABS.map((tab, i) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors -mb-px border-b-2 ${
+            className={`px-3 md:px-4 py-2 text-sm font-medium rounded-t-md transition-colors -mb-px border-b-2 whitespace-nowrap ${
               activeTab === tab
                 ? "text-white border-blue-500 bg-gray-900/40"
                 : "text-gray-500 border-transparent hover:text-gray-300 hover:border-gray-600"

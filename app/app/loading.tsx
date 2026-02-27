@@ -1,7 +1,7 @@
 export default function Loading() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8">
         {/* Header skeleton */}
         <div className="mb-8">
           <div className="h-7 w-32 bg-gray-800 animate-pulse rounded-lg" />
