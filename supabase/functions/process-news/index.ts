@@ -20,6 +20,11 @@
 // Deploy: supabase functions deploy process-news --project-ref pftgmorsthoezhmojjpg
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  matchTickersDeterministic,
+  preloadMatcherCache,
+  type MatchEvidence,
+} from "./ticker-matcher.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -376,38 +381,28 @@ async function processItem(
 ): Promise<ProcessResult> {
   const isEspi = item.source === "espi";
 
-  // ── ETAP 3 Step 1: Deterministic matching ─────────────────────────────────
-  const deterministicResults = deterministicMatch(
+  // ── Step 0: ESPI preset check ─────────────────────────────────────────────
+  // If fetch-espi already assigned tickers with confidence 1.0, preserve them.
+  const hasEspiPreset = isEspi &&
+    item.tickers && item.tickers.length > 0 &&
+    item.ticker_confidence != null &&
+    Object.values(item.ticker_confidence).some(v => v === ESPI_CONFIDENCE);
+
+  // ── Step 1: 3-layer deterministic ticker matcher ──────────────────────────
+  // Runs BEFORE AI on every article. Uses module-level cache (loaded once per batch).
+  const detResult = await matchTickersDeterministic(
     item.title,
-    item.body_text ?? item.summary,
-    aliasMap,
-    validTickers,
+    item.body_text ?? item.summary ?? "",
+    supabase,
   );
 
-  // Best deterministic confidence (ignoring ESPI — those are always certain)
-  const topDetConf   = deterministicResults[0]?.confidence ?? 0;
-  const useDeterminist = !isEspi && topDetConf >= 0.85;
-
-  // ESPI pre-assigned tickers (set by fetch-espi with confidence 1.0)
-  const espiPresetTickers: string[] = [];
-  if (isEspi && item.tickers && item.tickers.length > 0) {
-    for (const t of item.tickers) {
-      if (validTickers.has(t)) espiPresetTickers.push(t);
-    }
-  }
-
-  // Build heuristic map for fallback
-  const heuristicMap = new Map<string, number>();
-  for (const m of deterministicResults.slice(0, 3)) {
-    heuristicMap.set(m.ticker, m.confidence);
-  }
+  const isDeterministic = !hasEspiPreset && detResult.method === "deterministic";
 
   // ── Paywall filter — skip AI for paywalled sources with no body ────────────
   const hasContent = !!(item.body_text || (item.summary && item.summary.length >= 100));
   if (PAYWALL_SOURCES.includes(item.source) && !hasContent) {
-    const heurTickers = [...heuristicMap.keys()];
-    const paywallConf: Record<string, number> = {};
-    for (const [t, c] of heuristicMap) paywallConf[t] = c;
+    const paywallTickers = isDeterministic ? detResult.tickers : [];
+    const paywallConf    = isDeterministic ? detResult.confidence : {};
 
     const paywallUpdate: Record<string, unknown> = {
       ai_processed:      true,
@@ -415,17 +410,19 @@ async function processItem(
       category:          "other",
       ai_summary:        item.title.slice(0, 300),
       ticker_confidence: paywallConf,
-      relevance_score:   heurTickers.length > 0 ? 0.5 : 0.3,
-      ticker_method:     heurTickers.length > 0 ? "deterministic" : null,
-      ticker_evidence:   deterministicResults.flatMap(m => m.evidence).slice(0, 20),
+      relevance_score:   paywallTickers.length > 0 ? 0.5 : 0.3,
+      ticker_method:     paywallTickers.length > 0 ? "deterministic" : null,
+      ticker_evidence:   detResult.evidence.slice(0, 20),
       ticker_version:    2,
     };
-    if (heurTickers.length > 0) paywallUpdate.tickers = heurTickers;
+    if (paywallTickers.length > 0) paywallUpdate.tickers = paywallTickers;
+
     await supabase.from("news_items").update(paywallUpdate).eq("id", item.id);
-    console.log(`[process-news] item ${item.id}: paywall skip (${item.source})`);
+    console.log(`[process-news] item ${item.id}: paywall skip (${item.source}) tickers=[${paywallTickers.join(",")}]`);
     return { ok: true, id: item.id };
   }
 
+  // ── Step 2: AI analysis (always runs — for summary, sentiment, impact, etc.) ─
   let analysis: AIAnalysis | null = null;
   try {
     analysis = await analyzeItem(item, openaiKey);
@@ -434,97 +431,72 @@ async function processItem(
     console.warn(`[process-news] item ${item.id} AI error: ${msg}`);
   }
 
-  // ── ETAP 3 Step 2: Validate AI output ─────────────────────────────────────
+  // ── Step 3: Validate + clamp AI output ───────────────────────────────────
   if (analysis) {
-    // 1. Filter tickers to valid companies only
     analysis.tickers = analysis.tickers.filter(t => validTickers.has(t));
     const validatedConf: Record<string, number> = {};
     for (const [t, c] of Object.entries(analysis.ticker_confidence)) {
-      if (validTickers.has(t)) {
-        validatedConf[t] = Math.max(0, Math.min(1, c));
-      }
+      if (validTickers.has(t)) validatedConf[t] = Math.max(0, Math.min(1, c));
     }
     analysis.ticker_confidence = validatedConf;
 
-    // 2. Clamp scores
-    analysis.sentiment      = Math.max(-1, Math.min(1, analysis.sentiment));
-    analysis.impact_score   = Math.max(1,  Math.min(10, Math.round(analysis.impact_score)));
-    analysis.relevance_score = Math.max(0, Math.min(1, analysis.relevance_score));
+    analysis.sentiment       = Math.max(-1, Math.min(1, analysis.sentiment));
+    analysis.impact_score    = Math.max(1,  Math.min(10, Math.round(analysis.impact_score)));
+    analysis.relevance_score = Math.max(0,  Math.min(1, analysis.relevance_score));
 
-    // 3. Detect generic/hallucinated summaries
+    // Detect hallucinated summaries
     const summaryLower = (analysis.ai_summary ?? "").toLowerCase();
-    const isGeneric    = GENERIC_TEMPLATES.some(t => summaryLower.includes(t));
-    if (isGeneric) {
-      console.warn(`[process-news] item ${item.id}: generic summary detected, using fallback`);
+    if (GENERIC_TEMPLATES.some(t => summaryLower.includes(t))) {
+      console.warn(`[process-news] item ${item.id}: generic summary, using fallback`);
       const content = item.body_text ?? item.summary ?? "";
-      analysis.ai_summary = content.length >= 80
-        ? content.slice(0, 250)
-        : item.title.slice(0, 250);
-    }
-
-    // 4. If deterministic already found confident tickers, prefer them
-    if (useDeterminist && deterministicResults.length > 0) {
-      // Only use AI tickers if they have very high AI confidence AND aren't already found
-      const detSet = new Set(deterministicResults.map(m => m.ticker));
-      analysis.tickers = [
-        ...deterministicResults.map(m => m.ticker),
-        ...analysis.tickers.filter(t => !detSet.has(t) && (analysis!.ticker_confidence[t] ?? 0) >= 0.85),
-      ].slice(0, 5);
+      analysis.ai_summary = content.length >= 80 ? content.slice(0, 250) : item.title.slice(0, 250);
     }
   }
 
-  // ── Build final ticker confidence map ─────────────────────────────────────
+  // ── Step 4: Build final ticker map ────────────────────────────────────────
+  let finalTickers:    string[]              = [];
+  let mergedConf:      Record<string, number> = {};
+  let tickerMethod:    string | null          = null;
+  let tickerEvidence:  MatchEvidence[]        = [];
 
-  let mergedConf: Record<string, number> = {};
-  let finalTickers: string[] = [];
-  let tickerMethod: string | null = null;
-  const tickerEvidence: TickerEvidence[] = [];
-
-  if (isEspi && espiPresetTickers.length > 0) {
-    // ESPI with pre-assigned tickers: trust fetch-espi's extraction (confidence 1.0)
-    for (const t of espiPresetTickers) {
-      mergedConf[t] = ESPI_CONFIDENCE;
+  if (hasEspiPreset) {
+    // ESPI with pre-assigned tickers (confidence 1.0) — never overwrite
+    for (const t of (item.tickers ?? [])) {
+      if (validTickers.has(t)) mergedConf[t] = ESPI_CONFIDENCE;
     }
+    // Merge any additional AI tickers with very high confidence
     if (analysis) {
-      const aiConf = analysis.ticker_confidence;
-      for (const [t, c] of Object.entries(aiConf)) {
-        if (validTickers.has(t) && c >= 0.85 && !mergedConf[t]) {
+      for (const [t, c] of Object.entries(analysis.ticker_confidence)) {
+        if (validTickers.has(t) && c >= 0.85 && !mergedConf[t]) mergedConf[t] = c;
+      }
+    }
+    tickerMethod = "espi_preset";
+
+  } else if (isDeterministic) {
+    // 3-layer deterministic match succeeded → use it, AI tickers not overwritten
+    mergedConf    = { ...detResult.confidence };
+    tickerEvidence = detResult.evidence;
+
+    // Merge AI tickers only if they add something new with high confidence
+    if (analysis) {
+      const detSet = new Set(detResult.tickers);
+      for (const [t, c] of Object.entries(analysis.ticker_confidence)) {
+        if (validTickers.has(t) && c >= DISPLAY_THRESHOLD && !detSet.has(t)) {
           mergedConf[t] = c;
         }
       }
     }
-    tickerMethod = "espi_url";
-  } else if (useDeterminist) {
-    // Deterministic matching succeeded with high confidence — use it
-    for (const m of deterministicResults) {
-      mergedConf[m.ticker] = m.confidence;
-      tickerEvidence.push(...m.evidence.slice(0, 3));
-    }
-    // Still merge AI scores (take max)
-    if (analysis) {
-      for (const [t, c] of Object.entries(analysis.ticker_confidence)) {
-        if (validTickers.has(t) && c >= DISPLAY_THRESHOLD) {
-          mergedConf[t] = Math.max(mergedConf[t] ?? 0, c);
-        }
-      }
-    }
     tickerMethod = "deterministic";
+
   } else {
-    // Non-ESPI or low-confidence deterministic: use heuristic + AI
-    for (const [t, c] of heuristicMap) {
-      if (validTickers.has(t)) mergedConf[t] = c;
-    }
-
+    // AI needed — use AI tickers as primary
     if (analysis) {
-      const aiConf    = analysis.ticker_confidence;
       const aiTickers = analysis.tickers.filter(t => validTickers.has(t));
-
       for (const t of aiTickers) {
-        const aiC = aiConf[t] ?? 0.75;
-        mergedConf[t] = Math.max(mergedConf[t] ?? 0, aiC);
+        mergedConf[t] = analysis.ticker_confidence[t] ?? 0.75;
       }
-
-      for (const [t, c] of Object.entries(aiConf)) {
+      // Supplement with AI conf map
+      for (const [t, c] of Object.entries(analysis.ticker_confidence)) {
         if (validTickers.has(t) && c >= DISPLAY_THRESHOLD) {
           mergedConf[t] = Math.max(mergedConf[t] ?? 0, c);
         }
@@ -533,14 +505,18 @@ async function processItem(
     tickerMethod = "ai";
   }
 
-  // Only save tickers with confidence >= display threshold
+  // Final tickers: above display threshold, sorted by confidence desc
   finalTickers = Object.entries(mergedConf)
     .filter(([, c]) => c >= DISPLAY_THRESHOLD)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([t]) => t);
 
-  // Update news_items
+  // ── Step 5: Persist to DB ─────────────────────────────────────────────────
+  const relevanceScore: number = isEspi
+    ? 1.0
+    : analysis?.relevance_score ?? (finalTickers.length > 0 ? 0.6 : 0.3);
+
   const update: Record<string, unknown> = {
     ai_processed:      true,
     ticker_confidence: mergedConf,
@@ -548,12 +524,6 @@ async function processItem(
     ticker_evidence:   tickerEvidence.length > 0 ? tickerEvidence : undefined,
     ticker_version:    2,
   };
-  // ESPI always has relevance 1.0; for others derive from analysis or heuristic
-  const relevanceScore: number = isEspi
-    ? 1.0
-    : analysis
-      ? analysis.relevance_score
-      : finalTickers.length > 0 ? 0.6 : 0.3;
 
   if (analysis) {
     update.tickers           = finalTickers;
@@ -572,44 +542,35 @@ async function processItem(
   }
 
   const { error: updateErr } = await supabase
-    .from("news_items")
-    .update(update)
-    .eq("id", item.id);
+    .from("news_items").update(update).eq("id", item.id);
 
   if (updateErr) {
     console.error(`[process-news] item ${item.id} update error:`, updateErr.message);
     return { ok: false, id: item.id, error: updateErr.message };
   }
 
-  // Update companies.last_news_at for matched tickers
+  // Update companies.last_news_at
   if (finalTickers.length > 0) {
     const newsAt = item.published_at ?? new Date().toISOString();
     for (const ticker of finalTickers) {
-      await supabase
-        .from("companies")
-        .update({ last_news_at: newsAt })
+      await supabase.from("companies").update({ last_news_at: newsAt })
         .eq("ticker", ticker)
         .or(`last_news_at.is.null,last_news_at.lt.${newsAt}`);
     }
   }
 
-  // ZMIANA E: Assign event_group_id (best-effort, don't fail the item)
+  // Assign event_group_id
   if (finalTickers.length > 0) {
     try {
       await assignEventGroup(item.id, finalTickers, item.published_at, supabase);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[process-news] item ${item.id} group assignment failed: ${msg}`);
+      console.warn(`[process-news] item ${item.id} group assignment failed:`, err);
     }
   }
 
-  if (analysis) {
-    const totalConf = Object.entries(mergedConf)
-      .map(([t, c]) => `${t}:${c.toFixed(1)}`)
-      .join(",");
-    const breaking = analysis.is_breaking ? " 🚨BREAKING" : "";
-    console.log(`[process-news] item ${item.id}: impact=${analysis.impact_score} tickers=[${totalConf}] final=${finalTickers.join(",") || "none"}${breaking} ✓`);
-  }
+  const confStr  = Object.entries(mergedConf).map(([t, c]) => `${t}:${c.toFixed(2)}`).join(",");
+  const breaking = analysis?.is_breaking ? " BREAKING" : "";
+  console.log(`[process-news] item ${item.id}: method=${tickerMethod} tickers=[${confStr}] final=${finalTickers.join(",") || "none"}${breaking} ✓`);
 
   return { ok: true, id: item.id };
 }
@@ -654,7 +615,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .single();
   const runId = runRow.data?.id as number | undefined;
 
-  // ── Load ticker_aliases for heuristic matching ────────────────────────────
+  // ── Preload ticker-matcher cache (once per batch) ─────────────────────────
+  // ticker-matcher.ts uses module-level cache — this call loads aliases +
+  // companies into memory so per-item calls are O(1) DB reads.
+  await preloadMatcherCache(supabase);
+
+  // Legacy alias/ticker sets — still needed for AI-path ticker filtering
   const { data: aliasRows } = await supabase
     .from("ticker_aliases")
     .select("ticker, alias")
@@ -665,7 +631,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     aliasMap.set(a.alias.toLowerCase(), a.ticker);
   }
 
-  // Load all valid tickers from companies table
   const { data: companiesData } = await supabase
     .from("companies")
     .select("ticker");
@@ -674,7 +639,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     (companiesData ?? []).map((c: { ticker: string }) => c.ticker),
   );
 
-  console.log(`[process-news] ${aliasMap.size} aliases, ${validTickers.size} valid tickers`);
+  console.log(`[process-news] ${aliasMap.size} aliases, ${validTickers.size} valid tickers (matcher cache preloaded)`);
 
   // ── Fetch unprocessed batch ────────────────────────────────────────────────
   const { data: items, error: fetchErr } = await supabase
