@@ -89,6 +89,22 @@ function parsePubDate(raw: string): string | null {
 
 // ─── NAPRAWA A: Emitter extraction + company matching ─────────────────────────
 
+/** Keywords that mark the end of the emitter name in Bankier ESPI URL slugs. */
+const ESPI_KEYWORDS = new Set([
+  "wyniki", "raport", "zawiadomienie", "podpisanie", "podpisnie",
+  "rejestracja", "skonsolidowany", "unaudited", "informacja", "zmiana",
+  "korekta", "nabycie", "ustanowienie", "powolanie", "odwolanie",
+  "uchwala", "wykaz", "lista", "ogloszenie", "stanowisko",
+  "tresc", "aktualizacja", "sprawozdanie", "zawarcie", "zbycie",
+  "emisja", "skup", "rezygnacja", "komunikat", "uzupelnienie",
+  "dane", "zwolanie", "decyzja", "publikacja",
+]);
+
+/** Two-part legal suffixes (e.g. "S" + "A" in slug → "S-A"). */
+const LEGAL_PAIRS = new Set(["S-A", "S.A"]);
+/** Single-part legal suffixes. */
+const LEGAL_SINGLES = new Set(["SA", "AB", "SE", "NV", "PLC", "LTD"]);
+
 /** Normalize a company name for fuzzy matching. */
 function normalizeCompanyName(name: string): string {
   return name.toLowerCase()
@@ -102,25 +118,61 @@ function normalizeCompanyName(name: string): string {
     .replace(/\s+plc\s*$/gi, "")
     .replace(/\s+ltd\.?\s*$/gi, "")
     .replace(/\s+inc\.?\s*$/gi, "")
-    .replace(/\s+holding[s]?\s*$/gi, "")
-    .replace(/\s+group\s*$/gi, "")
     .replace(/[.,\-()]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/** Extract emitter name from Bankier ESPI URL.
- *  bankier.pl/wiadomosc/AMREST-Wyniki-finansowe-RR-2025-... → "AMREST"
- *  bankier.pl/wiadomosc/PKN-ORLEN-S-A-Wyniki-... → "PKN ORLEN S A"
+/** Extract emitter name from Bankier ESPI URL slug.
+ *
+ *  Algorithm:
+ *  1. Extract slug between /wiadomosc/ and .html
+ *  2. Strip trailing numeric ID (e.g. -9089820)
+ *  3. Split by "-", find first ESPI keyword → everything before = emitter parts
+ *  4. Strip trailing legal suffixes (S-A, SA, AB, SE …)
+ *  5. Return lowercased joined string
+ *
+ *  Examples:
+ *  mBank-S-A-Wyniki-finansowe-RR-2025-9089820.html → "mbank"
+ *  GRUPA-FORTE-S-A-Wyniki-finansowe-9089774.html   → "grupa forte"
+ *  Geotrans-SA-Raport-roczny-9090020.html          → "geotrans"
+ *  AMREST-Wyniki-finansowe-RR-2025-9089843.html    → "amrest"
  */
 function extractEmitterFromUrl(url: string): string | null {
-  const bankierMatch = url.match(
-    /wiadomosc\/(.+?)-(?:Wyniki|Raport|Sprawozdanie|Zawarcie|Nabycie|Zbycie|Emisja|Skup|Zmiana|Informacja|Komunikat|Powolanie|Rezygnacja|Rezygnacja|Ogłoszenie|Zwolanie|Zwołanie|Dane|Korekta|Uzupelnienie|Informacja|Uchwala|Aktualizacja|Lista|Nabycie|Rejestracja|Zmiana)/i
-  );
-  if (bankierMatch) {
-    return bankierMatch[1].replace(/-/g, " ").trim();
+  const m = url.match(/\/wiadomosc\/(.+?)\.html/);
+  if (!m) return null;
+
+  const parts = m[1].split("-");
+
+  // Remove trailing pure-numeric segments (Bankier article IDs)
+  while (parts.length > 0 && /^\d+$/.test(parts[parts.length - 1])) {
+    parts.pop();
   }
-  return null;
+
+  // Find first ESPI keyword — everything before it is the emitter
+  const keywordIdx = parts.findIndex(p => ESPI_KEYWORDS.has(p.toLowerCase()));
+  if (keywordIdx <= 0) return null;
+
+  let ep = parts.slice(0, keywordIdx);
+
+  // Strip trailing legal suffixes (loop handles stacked ones, e.g. "S A SE")
+  let changed = true;
+  while (changed && ep.length > 0) {
+    changed = false;
+    const n = ep.length;
+    if (n >= 2 && LEGAL_PAIRS.has(`${ep[n - 2]}-${ep[n - 1]}`.toUpperCase())) {
+      ep = ep.slice(0, -2);
+      changed = true;
+      continue;
+    }
+    if (LEGAL_SINGLES.has(ep[n - 1].toUpperCase())) {
+      ep = ep.slice(0, -1);
+      changed = true;
+    }
+  }
+
+  if (ep.length === 0) return null;
+  return ep.join(" ").trim().toLowerCase();
 }
 
 /** Extract emitter from ESPI title (everything before the first dash or colon). */
@@ -135,41 +187,79 @@ function extractEmitterFromTitle(title: string): string | null {
   return null;
 }
 
-/** Find the best matching ticker for a company emitter name. */
-function findTickerForEmitter(
-  emitterRaw: string,
-  index: CompanyEntry[],
-): string | null {
-  const emitterNorm = normalizeCompanyName(emitterRaw);
-  if (!emitterNorm || emitterNorm.length < 3) return null;
+// supabase client type alias for passing to async helpers
+type DbClient = ReturnType<typeof createClient>;
 
-  let bestTicker: string | null = null;
-  let bestScore = 0;
+/** Find the best matching ticker for a company emitter name.
+ *
+ *  Search order:
+ *  1. Exact match in ticker_aliases (DB)
+ *  2. In-memory fuzzy match against company index
+ *  3. ILIKE fallback in companies.name (DB)
+ *  4. Warn + return null if nothing found
+ */
+async function findTickerForEmitter(
+  emitterName:  string,
+  index:        CompanyEntry[],
+  db:           DbClient,
+  url:          string,
+): Promise<string | null> {
+  if (!emitterName || emitterName.length < 2) return null;
 
-  for (const company of index) {
-    for (const compNorm of company.normalized) {
-      if (!compNorm || compNorm.length < 2) continue;
+  // 1. Exact alias match
+  const { data: aliasRows } = await db
+    .from("ticker_aliases")
+    .select("ticker")
+    .ilike("alias", emitterName)
+    .limit(1);
 
-      // Exact match
-      if (compNorm === emitterNorm) return company.ticker;
+  if (aliasRows?.length) {
+    return (aliasRows[0] as { ticker: string }).ticker;
+  }
 
-      // Prefix match: company name starts with emitter (e.g. "amrest" vs "amrest holdings se")
-      const prefixScore = compNorm.startsWith(emitterNorm) ? emitterNorm.length / compNorm.length : 0;
+  // 2. In-memory fuzzy match (fast — avoids DB round-trip for most cases)
+  const emitterNorm = normalizeCompanyName(emitterName);
+  if (emitterNorm.length >= 2) {
+    let bestTicker: string | null = null;
+    let bestScore = 0;
 
-      // Substring match — emitter is in company name or vice versa
-      const subScore =
-        (compNorm.includes(emitterNorm) ? emitterNorm.length / compNorm.length : 0) +
-        (emitterNorm.includes(compNorm)  ? compNorm.length / emitterNorm.length  : 0);
+    for (const company of index) {
+      for (const compNorm of company.normalized) {
+        if (!compNorm || compNorm.length < 2) continue;
 
-      const score = Math.max(prefixScore, subScore);
+        if (compNorm === emitterNorm) return company.ticker;
 
-      if (score > bestScore && score > 0.55) {
-        bestScore = score;
-        bestTicker = company.ticker;
+        const prefixScore = compNorm.startsWith(emitterNorm)
+          ? emitterNorm.length / compNorm.length
+          : 0;
+        const subScore =
+          (compNorm.includes(emitterNorm) ? emitterNorm.length / compNorm.length : 0) +
+          (emitterNorm.includes(compNorm)  ? compNorm.length  / emitterNorm.length  : 0);
+        const score = Math.max(prefixScore, subScore);
+
+        if (score > bestScore && score >= 0.6) {
+          bestScore = score;
+          bestTicker = company.ticker;
+        }
       }
     }
+
+    if (bestTicker) return bestTicker;
   }
-  return bestTicker;
+
+  // 3. DB fallback: ILIKE on companies.name
+  const { data: compRows } = await db
+    .from("companies")
+    .select("ticker")
+    .ilike("name", `%${emitterName}%`)
+    .limit(1);
+
+  if (compRows?.length) {
+    return (compRows[0] as { ticker: string }).ticker;
+  }
+
+  console.warn(`[fetch-espi] ESPI: no match for emitter: "${emitterName}" from URL: ${url}`);
+  return null;
 }
 
 // ─── KROK 4: Extract body text + PDF attachments from RSS description ─────────
@@ -253,6 +343,7 @@ interface FetchResult {
 async function fetchRSS(
   url:          string,
   companyIndex: CompanyEntry[],
+  db:           DbClient,
 ): Promise<FetchResult> {
   const res = await fetch(url, {
     headers: { "User-Agent": BROWSER_UA, "Accept": "application/rss+xml, application/xml, text/xml" },
@@ -283,7 +374,7 @@ async function fetchRSS(
     let ticker_confidence: Record<string, number> = {};
 
     if (emitter) {
-      const ticker = findTickerForEmitter(emitter, companyIndex);
+      const ticker = await findTickerForEmitter(emitter, companyIndex, db, link);
       if (ticker) {
         tickers           = [ticker];
         ticker_confidence = { [ticker]: 1.0 };
@@ -382,7 +473,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
   for (const src of RSS_SOURCES) {
     try {
-      const result = await fetchRSS(src.url, companyIndex);
+      const result = await fetchRSS(src.url, companyIndex, supabase);
       if (result.records.length > 0) {
         records      = result.records;
         matchedCount = result.matchedCount;
