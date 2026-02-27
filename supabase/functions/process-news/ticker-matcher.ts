@@ -80,6 +80,26 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// ─── Polish-aware word boundaries ────────────────────────────────────────────
+//
+// JavaScript \b only treats ASCII [A-Za-z0-9_] as word characters.
+// Polish letters (ą,ć,ę,ł,ń,ó,ś,ź,ż) are \W — so:
+//   \b fails when the match ends with a Polish character (e.g. "mbanką"):
+//     "mbanką" followed by space → \W→\W transition → no boundary → NO MATCH.
+//   \b also fails to block partial matches when a Polish letter precedes
+//     the alias (e.g. "złmbank" → \W before "m" → \b fires → false match).
+//
+// Fix: negative lookahead/lookbehind with a Polish-inclusive word-char class.
+//   PLB = "not preceded by a Polish word char" (= word-start boundary)
+//   PRB = "not followed by a Polish word char" (= word-end boundary)
+
+const PWCHARS = "a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ0-9_";
+const PLB     = `(?<![${PWCHARS}])`;  // Polish Left  Boundary
+const PRB     = `(?![${PWCHARS}])`;   // Polish Right Boundary
+
+// Aliases to emit detailed debug logs for (lowercase).
+const DEBUG_ALIASES = new Set(["mbank", "kghm", "orlen", "pkn", "pko", "pzu"]);
+
 function merge(map: Map<string, Hit>, ticker: string, hit: Hit): void {
   const existing = map.get(ticker);
   if (!existing || hit.confidence > existing.confidence) {
@@ -156,13 +176,25 @@ function matchAliases(
     const escaped = escapeRegex(al);
 
     // For aliases 4+ chars: allow Polish inflection suffixes (up to 4 extra chars).
-    // For short aliases (<4): strict word boundary to avoid false positives.
-    const suffix  = al.length >= 4 ? "[a-ząćęłńóśźżu]{0,4}" : "";
-    const re      = new RegExp(`\\b${escaped}${suffix}\\b`, "gi");
+    // Use PLB/PRB (Polish-aware boundaries) instead of \b — JS \b treats Polish
+    // letters (ą,ę,ó…) as \W, so \b fails when the inflected form ends with a
+    // Polish character (e.g. "mbanką": after "ą"→space is \W→\W, no boundary).
+    const suffix  = al.length >= 4 ? `[${PWCHARS}]{0,4}` : "";
+    const re      = new RegExp(`${PLB}${escaped}${suffix}${PRB}`, "gi");
 
     const inTitle = re.test(titleLower);
     re.lastIndex  = 0;
     const inBody  = re.test(bodyLower);
+
+    // Debug logging for key aliases — helps diagnose missed matches in logs.
+    if (DEBUG_ALIASES.has(al)) {
+      console.log(
+        `[ticker-matcher] alias "${al}" → ${ticker}` +
+        ` | title[0:60]="${titleLower.substring(0, 60)}"` +
+        ` | inTitle=${inTitle} inBody=${inBody}` +
+        ` | regex=${PLB}${escaped}${suffix}${PRB}`,
+      );
+    }
 
     if (!inTitle && !inBody) continue;
 
@@ -171,7 +203,7 @@ function matchAliases(
       alias.length > 8 ? 0.90 :
       alias.length > 5 ? 0.80 : 0.70;
     const conf    = base + (inTitle ? 0.05 : 0);
-    const posRe   = new RegExp(`\\b${escaped}${suffix}\\b`, "i");
+    const posRe   = new RegExp(`${PLB}${escaped}${suffix}${PRB}`, "i");
     const pos     = inTitle ? titleLower.search(posRe) : bodyLower.search(posRe);
 
     merge(result, ticker, {
