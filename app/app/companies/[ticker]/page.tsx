@@ -245,6 +245,7 @@ function CompanyPageLayout({
         <CompanyTabs
           ticker={ticker}
           sector={sector}
+          market={market}
           events={events}
           latestPrice={latestPrice}
         />

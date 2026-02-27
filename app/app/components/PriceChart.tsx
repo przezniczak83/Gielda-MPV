@@ -136,7 +136,32 @@ export default function PriceChart({ ticker }: { ticker: string }) {
   const lastClose  = prices[prices.length - 1];
   const perfPct    = firstClose > 0 ? ((lastClose - firstClose) / firstClose) * 100 : 0;
   const perfPositive = perfPct >= 0;
-  const lineColor  = perfPositive ? "#22c55e" : "#ef4444";
+
+  // ── MA20 + 5-day slope → trend color ─────────────────────────────────────
+  function getTrendInfo(): { color: string; label: string; arrow: string } {
+    if (prices.length < 20) {
+      return perfPositive
+        ? { color: "#22c55e", label: "Trend wzrostowy", arrow: "↑" }
+        : { color: "#ef4444", label: "Trend spadkowy", arrow: "↓" };
+    }
+    const ma20: number[] = [];
+    for (let i = 19; i < prices.length; i++) {
+      const slice = prices.slice(i - 19, i + 1);
+      ma20.push(slice.reduce((a, b) => a + b, 0) / 20);
+    }
+    if (ma20.length < 5) {
+      return perfPositive
+        ? { color: "#22c55e", label: "Trend wzrostowy", arrow: "↑" }
+        : { color: "#ef4444", label: "Trend spadkowy", arrow: "↓" };
+    }
+    const ma20End   = ma20[ma20.length - 1];
+    const ma20Start = ma20[ma20.length - 5];
+    const slopePct  = ma20Start > 0 ? (ma20End - ma20Start) / ma20Start * 100 : 0;
+    if (slopePct > 1)  return { color: "#22c55e", label: "Trend wzrostowy", arrow: "↑" };
+    if (slopePct < -1) return { color: "#ef4444", label: "Trend spadkowy",  arrow: "↓" };
+    return { color: "#eab308", label: "Trend boczny", arrow: "→" };
+  }
+  const { color: lineColor, label: trendLabel, arrow: trendArrow } = getTrendInfo();
 
   const lastPoint = data[data.length - 1];
   const isLive    = lastPoint
@@ -176,6 +201,14 @@ export default function PriceChart({ ticker }: { ticker: string }) {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Trend label */}
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`text-xs font-semibold ${trendArrow === "↑" ? "text-green-400" : trendArrow === "↓" ? "text-red-400" : "text-yellow-400"}`}>
+          {trendArrow} {trendLabel}
+        </span>
+        <span className="text-xs text-gray-600">· MA20</span>
       </div>
 
       {/* Chart: Price line + Volume bars (dual axis) */}

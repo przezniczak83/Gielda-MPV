@@ -110,6 +110,14 @@ const CompanyTimeline = dynamic(
   },
 );
 
+const TradingViewWidget = dynamic(
+  () => import("./TradingViewWidget"),
+  {
+    loading: () => <div className="h-[420px] bg-gray-800 animate-pulse rounded-xl" />,
+    ssr:     false,
+  },
+);
+
 // ── Types (mirror server page.tsx) ─────────────────────────────────────────
 
 type Event = {
@@ -184,17 +192,20 @@ type Tab = typeof TABS[number];
 export default function CompanyTabs({
   ticker,
   sector,
+  market,
   events,
   latestPrice,
 }: {
   ticker:       string;
   sector?:      string | null;
+  market?:      string;
   events:       Event[];
   latestPrice:  LatestPrice;
 }) {
   const [activeTab,   setActiveTab]   = useState<Tab>("Przegląd");
   const [refreshing,  setRefreshing]  = useState(false);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
+  const [chartMode,   setChartMode]   = useState<"own" | "tv">("own");
 
   // ── Keyboard navigation (1–5 keys) ───────────────────────────────────────
   useEffect(() => {
@@ -290,10 +301,29 @@ export default function CompanyTabs({
             <TerminalOverview ticker={ticker} />
           </div>
           <div>
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
-              Wykres cen (30 dni)
-            </h2>
-            <PriceChart ticker={ticker} />
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
+                Wykres cen
+              </h2>
+              <div className="flex items-center gap-0.5 bg-gray-800/50 rounded-lg p-0.5">
+                <button
+                  onClick={() => setChartMode("own")}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${chartMode === "own" ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-300"}`}
+                >
+                  Prosty
+                </button>
+                <button
+                  onClick={() => setChartMode("tv")}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${chartMode === "tv" ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-300"}`}
+                >
+                  TradingView ↗
+                </button>
+              </div>
+            </div>
+            {chartMode === "own"
+              ? <PriceChart ticker={ticker} />
+              : <TradingViewWidget ticker={ticker} market={market ?? "GPW"} />
+            }
           </div>
           <div id="health-score">
             <HealthOverview ticker={ticker} />
