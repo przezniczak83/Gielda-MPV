@@ -23,7 +23,6 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 import {
   matchTickersDeterministic,
   preloadMatcherCache,
-  type MatchEvidence,
 } from "./ticker-matcher.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -409,6 +408,14 @@ async function processItem(
 ): Promise<ProcessResult> {
   const isEspi = item.source === "espi";
 
+  // Normalise text — guard against nullish values and reuse below
+  const title    = item.title    ?? "";
+  const bodyText = item.body_text ?? item.summary ?? "";
+
+  if (!title) {
+    console.warn(`[process-news] item ${item.id}: empty title`);
+  }
+
   // ── Step 0: ESPI preset check ─────────────────────────────────────────────
   // If fetch-espi already assigned tickers with confidence 1.0, preserve them.
   const hasEspiPreset = isEspi &&
@@ -418,10 +425,25 @@ async function processItem(
 
   // ── Step 1: 3-layer deterministic ticker matcher ──────────────────────────
   // Runs BEFORE AI on every article. Uses module-level cache (loaded once per batch).
-  const detResult = await matchTickersDeterministic(
-    item.title,
-    item.body_text ?? item.summary ?? "",
-    supabase,
+  const detResult = await matchTickersDeterministic(title, bodyText, supabase);
+
+  // Debug info — ALWAYS saved to ticker_evidence so every article is inspectable
+  // in the DB even when the deterministic matcher finds nothing.
+  const debugInfo: Record<string, unknown> = {
+    matcher_called: true,
+    method:         detResult.method,
+    tickers_found:  detResult.tickers,
+    evidence:       detResult.evidence,
+    title_length:   title.length,
+    body_length:    bodyText.length,
+    title_first_50: title.substring(0, 50),
+    cache_loaded:   true,
+  };
+
+  console.log(
+    `[process-news] item ${item.id}: matcher=${detResult.method}` +
+    ` tickers=[${detResult.tickers.join(",") || "none"}]` +
+    ` title="${title.substring(0, 60)}"`,
   );
 
   const isDeterministic = !hasEspiPreset && detResult.method === "deterministic";
@@ -436,11 +458,11 @@ async function processItem(
       ai_processed:      true,
       impact_score:      3,
       category:          "other",
-      ai_summary:        item.title.slice(0, 300),
+      ai_summary:        title.slice(0, 300),
       ticker_confidence: paywallConf,
       relevance_score:   paywallTickers.length > 0 ? 0.5 : 0.3,
       ticker_method:     paywallTickers.length > 0 ? "deterministic" : null,
-      ticker_evidence:   detResult.evidence.slice(0, 20),
+      ticker_evidence:   { ...debugInfo, paywall_skip: true },
       ticker_version:    2,
     };
     if (paywallTickers.length > 0) paywallUpdate.tickers = paywallTickers;
@@ -485,10 +507,9 @@ async function processItem(
   }
 
   // ── Step 4: Build final ticker map ────────────────────────────────────────
-  let finalTickers:    string[]              = [];
-  let mergedConf:      Record<string, number> = {};
-  let tickerMethod:    string | null          = null;
-  let tickerEvidence:  MatchEvidence[]        = [];
+  let finalTickers: string[]              = [];
+  let mergedConf:   Record<string, number> = {};
+  let tickerMethod: string | null          = null;
 
   if (hasEspiPreset) {
     // ESPI with pre-assigned tickers (confidence 1.0) — never overwrite
@@ -505,8 +526,7 @@ async function processItem(
 
   } else if (isDeterministic) {
     // 3-layer deterministic match succeeded → use it, AI tickers not overwritten
-    mergedConf    = { ...detResult.confidence };
-    tickerEvidence = detResult.evidence;
+    mergedConf = { ...detResult.confidence };
 
     // Merge AI tickers only if they add something new with high confidence
     if (analysis) {
@@ -552,7 +572,7 @@ async function processItem(
     ai_processed:      true,
     ticker_confidence: mergedConf,
     ticker_method:     tickerMethod,
-    ticker_evidence:   tickerEvidence.length > 0 ? tickerEvidence : undefined,
+    ticker_evidence:   debugInfo,   // always written — enables DB-level debugging
     ticker_version:    2,
   };
 
