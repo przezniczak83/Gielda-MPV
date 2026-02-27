@@ -23,6 +23,7 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 import {
   matchTickersDeterministic,
   preloadMatcherCache,
+  getMatcherCacheStats,
 } from "./ticker-matcher.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -429,15 +430,19 @@ async function processItem(
 
   // Debug info — ALWAYS saved to ticker_evidence so every article is inspectable
   // in the DB even when the deterministic matcher finds nothing.
+  const cacheStats = getMatcherCacheStats();
   const debugInfo: Record<string, unknown> = {
-    matcher_called: true,
-    method:         detResult.method,
-    tickers_found:  detResult.tickers,
-    evidence:       detResult.evidence,
-    title_length:   title.length,
-    body_length:    bodyText.length,
-    title_first_50: title.substring(0, 50),
-    cache_loaded:   true,
+    matcher_called:       true,
+    method:               detResult.method,
+    tickers_found:        detResult.tickers,
+    evidence:             detResult.evidence,
+    title_length:         title.length,
+    body_length:          bodyText.length,
+    title_first_50:       title.substring(0, 50),
+    cache_loaded:         true,
+    debug_aliases_count:  cacheStats.aliasCount,
+    debug_has_mbank:      cacheStats.hasMbank,
+    debug_sample_aliases: cacheStats.sampleAliases,
   };
 
   console.log(

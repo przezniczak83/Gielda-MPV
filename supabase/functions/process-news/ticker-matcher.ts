@@ -60,7 +60,14 @@ export async function preloadMatcherCache(supabase: SupabaseClient): Promise<voi
   _companies = (compRes.data   ?? []) as CompanyRow[];
   _validSet  = new Set(_companies.map(c => c.ticker));
 
+  // ── Cache load diagnostics ────────────────────────────────────────────────
+  const mbankAliases = _aliases.filter(a => a.alias.toLowerCase().includes("mbank"));
   console.log(`[ticker-matcher] cache: ${_aliases.length} aliases, ${_companies.length} companies`);
+  console.log(`[ticker-matcher] Sample aliases (first 10): ${_aliases.slice(0, 10).map(a => `${a.alias}→${a.ticker}`).join(", ")}`);
+  console.log(`[ticker-matcher] mbank aliases in cache: ${JSON.stringify(mbankAliases)}`);
+  if (_aliases.length === 0) {
+    console.error(`[ticker-matcher] ERROR: alias cache is EMPTY — check ticker_aliases table and RLS policies`);
+  }
 }
 
 async function ensureCache(supabase: SupabaseClient): Promise<{
@@ -72,6 +79,15 @@ async function ensureCache(supabase: SupabaseClient): Promise<{
     await preloadMatcherCache(supabase);
   }
   return { aliases: _aliases!, companies: _companies!, validSet: _validSet! };
+}
+
+/** Return alias cache stats for external debug info (e.g. ticker_evidence). */
+export function getMatcherCacheStats(): { aliasCount: number; hasMbank: boolean; sampleAliases: string[] } {
+  return {
+    aliasCount:   _aliases?.length ?? 0,
+    hasMbank:     _aliases?.some(a => a.alias.toLowerCase().includes("mbank")) ?? false,
+    sampleAliases: (_aliases ?? []).slice(0, 5).map(a => `${a.alias}→${a.ticker}`),
+  };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -170,6 +186,25 @@ function matchAliases(
   const sorted = [...aliases]
     .filter(a => a.alias.length >= 4 && validSet.has(a.ticker))
     .sort((a, b) => b.alias.length - a.alias.length);
+
+  // ── Title-triggered deep debug (fires when title contains mbank/orlen) ────
+  const debugTitle = titleLower.includes("mbank") || titleLower.includes("orlen");
+  if (debugTitle) {
+    console.log(`[ticker-matcher] DEBUG title:      "${titleLower.substring(0, 80)}"`);
+    console.log(`[ticker-matcher] DEBUG sorted cnt: ${sorted.length} (filtered from ${aliases.length})`);
+
+    // First 5 aliases that start with 'm' (after lowercasing) — is 'mbank' there?
+    const mAliases = sorted.filter(a => a.alias.toLowerCase().startsWith("m")).slice(0, 5);
+    console.log(`[ticker-matcher] DEBUG m-aliases:  ${JSON.stringify(mAliases)}`);
+
+    // Manual regex test for mbank on the lowercased title
+    const mbankRe = new RegExp(`${PLB}mbank[${PWCHARS}]{0,4}${PRB}`, "gi");
+    const mbankHit = mbankRe.exec(titleLower);
+    console.log(`[ticker-matcher] DEBUG mbank regex on titleLower: ${mbankHit ? `"${mbankHit[0]}" at ${mbankHit.index}` : "NO MATCH"}`);
+
+    // Also test raw .includes as sanity check
+    console.log(`[ticker-matcher] DEBUG titleLower.includes("mbank"): ${titleLower.includes("mbank")}`);
+  }
 
   for (const { ticker, alias } of sorted) {
     const al      = alias.toLowerCase();
