@@ -161,7 +161,7 @@ function generateAliases(ticker: string, name: string): AliasRow[] {
     "DNP":  ["dino", "dino polska"],
     "LPP":  ["reserved", "cropp", "mohito"],
     "CPS":  ["cyfrowy polsat", "polsat", "cyfrowy polsat sa"],
-    "ALR":  ["amrest", "amrest holdings"],
+    "EAT":  ["amrest", "am rest", "amrest holdings"],
     "JSW":  ["jastrzebska spolka weglowa", "jastrzębska spółka węglowa"],
     "PCO":  ["azoty police"],
     "ATT":  ["azoty tarnów", "azoty tarno"],
