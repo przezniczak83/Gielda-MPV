@@ -1,5 +1,5 @@
 // app/api/screener/route.ts
-// Company screener — dynamic filters on company_snapshot JSONB.
+// Company screener — dynamic filters on company_snapshot JSONB + companies RS data.
 //
 // POST body:
 // {
@@ -7,12 +7,13 @@
 //   sector?:        string          (partial match)
 //   health_min?:    number          (0–10)
 //   health_max?:    number          (0–10)
-//   impact_min?:    number          (0–10)  — min avg event impact
 //   price_min?:     number
 //   price_max?:     number
 //   change_min?:    number          (%)
 //   change_max?:    number          (%)
-//   sort_by?:       "health" | "price" | "change" | "ticker"
+//   rs_min?:        number          (RS score, 100 = parity with WIG20)
+//   rs_trend?:      "up" | "down" | "flat"
+//   sort_by?:       "health" | "price" | "change" | "ticker" | "rs"
 //   sort_dir?:      "asc" | "desc"
 //   limit?:         number          (max 100)
 // }
@@ -39,7 +40,9 @@ interface ScreenerRequest {
   price_max?:  number;
   change_min?: number;
   change_max?: number;
-  sort_by?:    "health" | "price" | "change" | "ticker";
+  rs_min?:     number;
+  rs_trend?:   "up" | "down" | "flat";
+  sort_by?:    "health" | "price" | "change" | "ticker" | "rs";
   sort_dir?:   "asc" | "desc";
   limit?:      number;
 }
@@ -55,6 +58,12 @@ interface SnapshotRow {
   computed_at: string;
 }
 
+interface RsRow {
+  ticker:   string;
+  rs_score: number | null;
+  rs_trend: string | null;
+}
+
 interface ScreenerResult {
   ticker:      string;
   name:        string;
@@ -63,6 +72,8 @@ interface ScreenerResult {
   price:       number | null;
   change_pct:  number | null;
   health:      number | null;
+  rs_score:    number | null;
+  rs_trend:    string | null;
   computed_at: string;
 }
 
@@ -78,6 +89,8 @@ export async function POST(req: NextRequest) {
     price_max,
     change_min,
     change_max,
+    rs_min,
+    rs_trend,
     sort_by    = "ticker",
     sort_dir   = "asc",
     limit      = 50,
@@ -85,18 +98,28 @@ export async function POST(req: NextRequest) {
 
   const db = supabase();
 
-  // Fetch all snapshots — filter in JS for JSONB fields
-  // (Supabase doesn't support complex JSONB filters in the client)
-  let query = db
-    .from("company_snapshot")
-    .select("ticker, snapshot, computed_at")
-    .order("ticker", { ascending: true })
-    .limit(500);
+  // Fetch snapshots + RS data in parallel
+  const [snapshotRes, rsRes] = await Promise.all([
+    db.from("company_snapshot")
+      .select("ticker, snapshot, computed_at")
+      .order("ticker", { ascending: true })
+      .limit(500),
+    db.from("companies")
+      .select("ticker, rs_score, rs_trend")
+      .not("rs_score", "is", null),
+  ]);
 
-  const { data, error } = await query;
-  if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
+  if (snapshotRes.error) {
+    return Response.json({ ok: false, error: snapshotRes.error.message }, { status: 500 });
+  }
 
-  let rows = (data ?? []) as SnapshotRow[];
+  // Build RS lookup map
+  const rsMap = new Map<string, RsRow>();
+  for (const r of (rsRes.data ?? []) as RsRow[]) {
+    rsMap.set(r.ticker, r);
+  }
+
+  let rows = (snapshotRes.data ?? []) as SnapshotRow[];
 
   // ── Client-side filters ──────────────────────────────────────────────────
   if (market !== "ALL") {
@@ -149,6 +172,17 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  if (rs_min !== undefined) {
+    rows = rows.filter(r => {
+      const rs = rsMap.get(r.ticker)?.rs_score ?? null;
+      return rs !== null && rs >= rs_min;
+    });
+  }
+
+  if (rs_trend) {
+    rows = rows.filter(r => rsMap.get(r.ticker)?.rs_trend === rs_trend);
+  }
+
   // ── Map to result shape ───────────────────────────────────────────────────
   let results: ScreenerResult[] = rows.map(r => ({
     ticker:      r.ticker,
@@ -158,6 +192,8 @@ export async function POST(req: NextRequest) {
     price:       r.snapshot.price?.close ?? null,
     change_pct:  r.snapshot.price?.change_pct ?? null,
     health:      r.snapshot.health_score ?? null,
+    rs_score:    rsMap.get(r.ticker)?.rs_score ?? null,
+    rs_trend:    rsMap.get(r.ticker)?.rs_trend ?? null,
     computed_at: r.computed_at,
   }));
 
@@ -179,6 +215,11 @@ export async function POST(req: NextRequest) {
         const ac = a.change_pct ?? -Infinity;
         const bc = b.change_pct ?? -Infinity;
         return dir * (ac - bc);
+      }
+      case "rs": {
+        const ar = a.rs_score ?? -Infinity;
+        const br = b.rs_score ?? -Infinity;
+        return dir * (ar - br);
       }
       default:
         return dir * a.ticker.localeCompare(b.ticker);

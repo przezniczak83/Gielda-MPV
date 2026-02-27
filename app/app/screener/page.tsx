@@ -11,6 +11,8 @@ interface ScreenerResult {
   price:      number | null;
   change_pct: number | null;
   health:     number | null;
+  rs_score:   number | null;
+  rs_trend:   string | null;
 }
 
 interface Filters {
@@ -22,7 +24,9 @@ interface Filters {
   price_max:  string;
   change_min: string;
   change_max: string;
-  sort_by:    "ticker" | "health" | "price" | "change";
+  rs_min:     string;
+  rs_trend:   "" | "up" | "down" | "flat";
+  sort_by:    "ticker" | "health" | "price" | "change" | "rs";
   sort_dir:   "asc" | "desc";
 }
 
@@ -31,11 +35,13 @@ const PRESETS: { label: string; filters: Partial<Filters> }[] = [
   { label: "USA Momentum",    filters: { market: "USA", sort_by: "change",  sort_dir: "desc" } },
   { label: "Tanie GPW",       filters: { market: "GPW", sort_by: "price",   sort_dir: "asc",  price_max: "30" } },
   { label: "Ryzykowne",       filters: { sort_by: "health", sort_dir: "asc", health_max: "4" } },
+  { label: "GPW Momentum",    filters: { market: "GPW", sort_by: "rs", sort_dir: "desc", rs_trend: "up" } },
 ];
 
 const DEFAULT_FILTERS: Filters = {
   market: "ALL", sector: "", health_min: "", health_max: "",
   price_min: "", price_max: "", change_min: "", change_max: "",
+  rs_min: "", rs_trend: "",
   sort_by: "ticker", sort_dir: "asc",
 };
 
@@ -65,6 +71,17 @@ function ChangeBadge({ pct }: { pct: number | null }) {
   );
 }
 
+function RsBadge({ score, trend }: { score: number | null; trend: string | null }) {
+  if (score === null) return <span className="text-gray-600 text-xs">—</span>;
+  const arrow = trend === "up" ? "↑" : trend === "down" ? "↓" : "→";
+  const color = trend === "up" ? "text-green-400" : trend === "down" ? "text-red-400" : "text-yellow-400";
+  return (
+    <span className={`text-xs font-mono font-semibold ${color}`}>
+      {arrow} {score.toFixed(1)}
+    </span>
+  );
+}
+
 export default function ScreenerPage() {
   const [filters,  setFilters]  = useState<Filters>(DEFAULT_FILTERS);
   const [results,  setResults]  = useState<ScreenerResult[]>([]);
@@ -85,6 +102,8 @@ export default function ScreenerPage() {
         price_max:  f.price_max  ? Number(f.price_max)  : undefined,
         change_min: f.change_min ? Number(f.change_min) : undefined,
         change_max: f.change_max ? Number(f.change_max) : undefined,
+        rs_min:     f.rs_min     ? Number(f.rs_min)     : undefined,
+        rs_trend:   f.rs_trend   || undefined,
         sort_by:    f.sort_by,
         sort_dir:   f.sort_dir,
         limit:      100,
@@ -255,6 +274,38 @@ export default function ScreenerPage() {
                 </div>
               </div>
 
+              {/* RS Score */}
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">RS Score min (vs WIG20)</label>
+                <input
+                  type="number"
+                  value={filters.rs_min}
+                  onChange={e => setFilters(f => ({ ...f, rs_min: e.target.value }))}
+                  placeholder="np. 102"
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {/* RS Trend */}
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">RS Trend</label>
+                <div className="flex gap-1">
+                  {([["", "Każdy"], ["up", "↑ Rosnący"], ["flat", "→ Boczny"], ["down", "↓ Spadający"]] as const).map(([v, l]) => (
+                    <button
+                      key={v}
+                      onClick={() => setFilters(f => ({ ...f, rs_trend: v }))}
+                      className={`flex-1 py-1.5 text-xs rounded-md font-medium transition-colors ${
+                        filters.rs_trend === v
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                      }`}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <button
                 onClick={() => search()}
                 disabled={loading}
@@ -345,6 +396,12 @@ export default function ScreenerPage() {
                           >
                             Health <SortArrow col="health" />
                           </th>
+                          <th
+                            className="px-4 py-2.5 text-right text-xs text-gray-500 font-semibold cursor-pointer hover:text-gray-300 transition-colors"
+                            onClick={() => toggleSort("rs")}
+                          >
+                            RS <SortArrow col="rs" />
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800/60">
@@ -381,6 +438,9 @@ export default function ScreenerPage() {
                             </td>
                             <td className="px-4 py-3">
                               <HealthBar value={r.health} />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <RsBadge score={r.rs_score} trend={r.rs_trend} />
                             </td>
                           </tr>
                         ))}

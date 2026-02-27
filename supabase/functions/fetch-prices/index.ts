@@ -402,6 +402,47 @@ async function fetchWithFallback(
   return { rows: [], sourceUsed: "none" };
 }
 
+// ─── RS Score helpers ─────────────────────────────────────────────────────────
+
+/** Compute RS score (relative to WIG20) and trend for a ticker.
+ *
+ *  RS_normalized = (ticker_today / ticker_base) / (wig20_today / wig20_base) * 100
+ *  rs_trend = direction of RS over last 5 trading days.
+ */
+function computeRS(
+  pricesSortedDesc: { date: string; close: number }[],
+  wig20Map: Map<string, number>,
+): { rs_score: number; rs_trend: "up" | "down" | "flat" } | null {
+  // Keep only rows where we have matching WIG20 data
+  const common = pricesSortedDesc
+    .filter(r => r.close > 0 && wig20Map.has(r.date))
+    .map(r => ({ date: r.date, close: r.close, wig20: wig20Map.get(r.date)! }));
+
+  if (common.length < 2) return null;
+
+  const latest = common[0];
+  const base   = common[common.length - 1];
+
+  if (base.close <= 0 || base.wig20 <= 0 || latest.wig20 <= 0) return null;
+
+  const rsLatest = ((latest.close / base.close) / (latest.wig20 / base.wig20)) * 100;
+
+  let rsTrend: "up" | "down" | "flat" = "flat";
+  if (common.length >= 6) {
+    const ref = common[5]; // ~5 trading days ago
+    if (ref.close > 0 && ref.wig20 > 0) {
+      const rs5d = ((ref.close / base.close) / (ref.wig20 / base.wig20)) * 100;
+      const delta = rsLatest - rs5d;
+      rsTrend = delta > 1 ? "up" : delta < -1 ? "down" : "flat";
+    }
+  }
+
+  return {
+    rs_score: Math.round(rsLatest * 10000) / 10000,
+    rs_trend: rsTrend,
+  };
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (_req: Request): Promise<Response> => {
@@ -466,6 +507,28 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     .from("system_config")
     .upsert({ key: "fetch_prices_offset", value: String(nextOffset), updated_at: new Date().toISOString() });
 
+  // ── Fetch WIG20 prices for RS computation ─────────────────────────────────
+  const wig20Map = new Map<string, number>(); // date -> close
+  try {
+    const wig20Rows = await fetchRailwayGPW("WIG20");
+    for (const r of wig20Rows) {
+      if (r.close != null) wig20Map.set(r.date, r.close);
+    }
+    console.log(`[fetch-prices] WIG20 (Railway): ${wig20Map.size} price points`);
+  } catch (_err) {
+    // Fallback: read from price_history
+    const { data: wig20Db } = await supabase
+      .from("price_history")
+      .select("date, close")
+      .eq("ticker", "WIG20")
+      .order("date", { ascending: false })
+      .limit(35);
+    for (const r of (wig20Db ?? [])) {
+      if (r.close != null) wig20Map.set(r.date as string, Number(r.close));
+    }
+    console.log(`[fetch-prices] WIG20 (DB fallback): ${wig20Map.size} price points`);
+  }
+
   // ── Railway batch for all GPW tickers in one HTTP call ────────────────────
   const gpwBatch = batch.filter(c => c.market === "GPW").map(c => c.ticker);
   const batchMap = new Map<string, OHLCV[]>();
@@ -524,7 +587,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       continue;
     }
 
-    // Update companies.last_price + change_1d from newest two rows
+    // Update companies.last_price, change_1d, rs_score, rs_trend
     const sorted = [...priceRows].sort((a, b) => b.date.localeCompare(a.date));
     const latest = sorted[0];
     const prev   = sorted[1];
@@ -532,10 +595,20 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       const change1d = (prev?.close != null && prev.close > 0)
         ? Math.round(((latest.close - prev.close) / prev.close * 100) * 10000) / 10000
         : null;
+
+      // RS score vs WIG20 (GPW tickers only)
+      const rs = market === "GPW" && wig20Map.size >= 2
+        ? computeRS(
+            sorted.filter(r => r.close != null).map(r => ({ date: r.date, close: r.close! })),
+            wig20Map,
+          )
+        : null;
+
       await supabase.from("companies").update({
         last_price:       latest.close,
         change_1d:        change1d,
         price_updated_at: new Date().toISOString(),
+        ...(rs ? { rs_score: rs.rs_score, rs_trend: rs.rs_trend, rs_updated_at: new Date().toISOString() } : {}),
       }).eq("ticker", ticker);
     }
 
