@@ -154,7 +154,11 @@ function matchAliases(
   for (const { ticker, alias } of sorted) {
     const al      = alias.toLowerCase();
     const escaped = escapeRegex(al);
-    const re      = new RegExp(`\\b${escaped}\\b`, "gi");
+
+    // For aliases 4+ chars: allow Polish inflection suffixes (up to 4 extra chars).
+    // For short aliases (<4): strict word boundary to avoid false positives.
+    const suffix  = al.length >= 4 ? "[a-ząćęłńóśźżu]{0,4}" : "";
+    const re      = new RegExp(`\\b${escaped}${suffix}\\b`, "gi");
 
     const inTitle = re.test(titleLower);
     re.lastIndex  = 0;
@@ -167,7 +171,8 @@ function matchAliases(
       alias.length > 8 ? 0.90 :
       alias.length > 5 ? 0.80 : 0.70;
     const conf    = base + (inTitle ? 0.05 : 0);
-    const pos     = inTitle ? titleLower.search(new RegExp(`\\b${escaped}\\b`, "i")) : bodyLower.search(new RegExp(`\\b${escaped}\\b`, "i"));
+    const posRe   = new RegExp(`\\b${escaped}${suffix}\\b`, "i");
+    const pos     = inTitle ? titleLower.search(posRe) : bodyLower.search(posRe);
 
     merge(result, ticker, {
       confidence: Math.min(conf, 0.95),
