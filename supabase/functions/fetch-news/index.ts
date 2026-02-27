@@ -315,6 +315,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     .single();
   const runId = runRow.data?.id as number | undefined;
 
+  try {
   // ── STEP 1: Strefa Inwestorów via Railway scraper ────────────────────────
   const scraperUrl = Deno.env.get("RAILWAY_SCRAPER_URL");
   const scraperKey = Deno.env.get("RAILWAY_SCRAPER_KEY") ?? "";
@@ -453,6 +454,13 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     }).eq("id", runId);
   }
 
+  await supabase.from("system_health").upsert({
+    function_name:        "fetch-news",
+    last_success_at:      doneAt,
+    items_processed:      totalInserted,
+    consecutive_failures: 0,
+  }, { onConflict: "function_name" }).catch(() => {});
+
   console.log(`[fetch-news] Done: +${totalInserted} inserted, ${totalSkipped} skipped, ms=${Date.now() - startTime}`);
 
   return new Response(
@@ -465,4 +473,28 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    const failAt = new Date().toISOString();
+    console.error("[fetch-news] Fatal:", errMsg);
+    if (runId) {
+      await supabase.from("pipeline_runs").update({
+        finished_at:   failAt,
+        status:        "failed",
+        items_in:      totalInserted + totalSkipped,
+        items_out:     totalInserted,
+        errors:        1,
+        error_message: errMsg,
+      }).eq("id", runId).catch(() => {});
+    }
+    await supabase.from("system_health").upsert({
+      function_name: "fetch-news",
+      last_error:    errMsg,
+      last_error_at: failAt,
+    }, { onConflict: "function_name" }).catch(() => {});
+    return new Response(
+      JSON.stringify({ ok: false, error: errMsg }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
 });

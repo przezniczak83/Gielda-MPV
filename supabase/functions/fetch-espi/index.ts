@@ -437,6 +437,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   let itemsOut = 0;
   let runErrors = 0;
 
+  try {
   // ── Load company index for emitter matching ────────────────────────────────
   const { data: companies, error: compErr } = await supabase
     .from("companies")
@@ -512,12 +513,18 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
   if (error) {
     console.error("[fetch-espi] Insert error:", error.message);
+    const failAt = new Date().toISOString();
     if (runId) {
       await supabase.from("pipeline_runs").update({
-        finished_at: new Date().toISOString(), status: "failed",
+        finished_at: failAt, status: "failed",
         errors: runErrors + 1, details: { error: error.message },
-      }).eq("id", runId);
+      }).eq("id", runId).catch(() => {});
     }
+    await supabase.from("system_health").upsert({
+      function_name: "fetch-espi",
+      last_error:    error.message,
+      last_error_at: failAt,
+    }, { onConflict: "function_name" }).catch(() => {});
     return new Response(
       JSON.stringify({ ok: false, error: error.message }),
       { status: 500, headers: { "Content-Type": "application/json" } },
@@ -586,15 +593,23 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   }
 
   // ── Mark pipeline run success ──────────────────────────────────────────────
+  const doneAt = new Date().toISOString();
   if (runId) {
     await supabase.from("pipeline_runs").update({
-      finished_at: new Date().toISOString(),
+      finished_at: doneAt,
       status:      runErrors === 0 ? "success" : "failed",
       items_in:    totalItems,
       items_out:   itemsOut,
       errors:      runErrors,
-    }).eq("id", runId);
+    }).eq("id", runId).catch(() => {});
   }
+
+  await supabase.from("system_health").upsert({
+    function_name:        "fetch-espi",
+    last_success_at:      doneAt,
+    items_processed:      itemsOut,
+    consecutive_failures: 0,
+  }, { onConflict: "function_name" }).catch(() => {});
 
   return new Response(
     JSON.stringify({
@@ -604,8 +619,32 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       total_rss:     totalItems,
       emitter_match: matchedCount,
       tickers:       [...new Set(records.flatMap(r => r.tickers))],
-      ts:            new Date().toISOString(),
+      ts:            doneAt,
     }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    const failAt = new Date().toISOString();
+    console.error("[fetch-espi] Fatal:", errMsg);
+    if (runId) {
+      await supabase.from("pipeline_runs").update({
+        finished_at:   failAt,
+        status:        "failed",
+        items_in:      totalItems,
+        items_out:     itemsOut,
+        errors:        runErrors + 1,
+        error_message: errMsg,
+      }).eq("id", runId).catch(() => {});
+    }
+    await supabase.from("system_health").upsert({
+      function_name: "fetch-espi",
+      last_error:    errMsg,
+      last_error_at: failAt,
+    }, { onConflict: "function_name" }).catch(() => {});
+    return new Response(
+      JSON.stringify({ ok: false, error: errMsg }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
 });

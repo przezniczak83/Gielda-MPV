@@ -615,6 +615,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .single();
   const runId = runRow.data?.id as number | undefined;
 
+  try {
   // ── Preload ticker-matcher cache (once per batch) ─────────────────────────
   // ticker-matcher.ts uses module-level cache — this call loads aliases +
   // companies into memory so per-item calls are O(1) DB reads.
@@ -714,8 +715,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       items_in:    batch.length,
       items_out:   processed,
       errors:      failed,
-    }).eq("id", runId);
+    }).eq("id", runId).catch(() => {});
   }
+
+  await supabase.from("system_health").upsert({
+    function_name:        "process-news",
+    last_success_at:      doneAt,
+    items_processed:      processed,
+    consecutive_failures: 0,
+  }, { onConflict: "function_name" }).catch(() => {});
 
   console.log(`[process-news] Done: processed=${processed}, failed=${failed}, total=${batch.length}, ms=${Date.now() - startTime}`);
 
@@ -730,4 +738,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    const failAt = new Date().toISOString();
+    console.error("[process-news] Fatal:", errMsg);
+    if (runId) {
+      await supabase.from("pipeline_runs").update({
+        finished_at:   failAt,
+        status:        "failed",
+        items_in:      0,
+        items_out:     0,
+        errors:        1,
+        error_message: errMsg,
+      }).eq("id", runId).catch(() => {});
+    }
+    await supabase.from("system_health").upsert({
+      function_name: "process-news",
+      last_error:    errMsg,
+      last_error_at: failAt,
+    }, { onConflict: "function_name" }).catch(() => {});
+    return new Response(
+      JSON.stringify({ ok: false, error: errMsg }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
 });
