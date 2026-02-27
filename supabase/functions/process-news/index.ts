@@ -607,13 +607,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const limit = isTriggered ? TRIGGER_BATCH : BATCH_SIZE;
   if (isTriggered) console.log(`[process-news] Trigger mode — limit=${limit}`);
 
-  // ── Pipeline run logging ───────────────────────────────────────────────────
-  const runRow = await supabase
-    .from("pipeline_runs")
-    .insert({ function_name: "process-news", source: "gpt-4o-mini", status: "running" })
-    .select("id")
-    .single();
-  const runId = runRow.data?.id as number | undefined;
+  const startedAt = new Date().toISOString();
 
   try {
   // ── Preload ticker-matcher cache (once per batch) ─────────────────────────
@@ -651,6 +645,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .limit(limit);
 
   if (fetchErr) {
+    await supabase.from("pipeline_runs").insert({
+      function_name: "process-news",
+      started_at:    startedAt,
+      finished_at:   new Date().toISOString(),
+      status:        "failed",
+      items_in:      0,
+      items_out:     0,
+      errors:        1,
+      error_message: fetchErr.message,
+      details:       { model: "gpt-4o-mini" },
+    }).catch(() => {});
     return new Response(
       JSON.stringify({ ok: false, error: fetchErr.message }),
       { status: 500, headers: { "Content-Type": "application/json" } },
@@ -661,6 +666,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
   console.log(`[process-news] ${batch.length} unprocessed items to analyze`);
 
   if (batch.length === 0) {
+    await supabase.from("pipeline_runs").insert({
+      function_name: "process-news",
+      started_at:    startedAt,
+      finished_at:   new Date().toISOString(),
+      status:        "success",
+      items_in:      0,
+      items_out:     0,
+      errors:        0,
+      details:       { model: "gpt-4o-mini" },
+    }).catch(() => {});
     return new Response(
       JSON.stringify({ ok: true, processed: 0, failed: 0, ts: new Date().toISOString() }),
       { status: 200, headers: { "Content-Type": "application/json" } },
@@ -708,15 +723,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     duration_ms:      Date.now() - startTime,
   });
 
-  if (runId) {
-    await supabase.from("pipeline_runs").update({
-      finished_at: doneAt,
-      status:      failed === 0 ? "success" : "failed",
-      items_in:    batch.length,
-      items_out:   processed,
-      errors:      failed,
-    }).eq("id", runId).catch(() => {});
-  }
+  await supabase.from("pipeline_runs").insert({
+    function_name: "process-news",
+    started_at:    startedAt,
+    finished_at:   doneAt,
+    status:        failed === 0 ? "success" : "partial",
+    items_in:      batch.length,
+    items_out:     processed,
+    errors:        failed,
+    details:       { model: "gpt-4o-mini" },
+  }).catch(() => {});
 
   await supabase.from("system_health").upsert({
     function_name:        "process-news",
@@ -742,16 +758,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const errMsg = e instanceof Error ? e.message : String(e);
     const failAt = new Date().toISOString();
     console.error("[process-news] Fatal:", errMsg);
-    if (runId) {
-      await supabase.from("pipeline_runs").update({
-        finished_at:   failAt,
-        status:        "failed",
-        items_in:      0,
-        items_out:     0,
-        errors:        1,
-        error_message: errMsg,
-      }).eq("id", runId).catch(() => {});
-    }
+    await supabase.from("pipeline_runs").insert({
+      function_name: "process-news",
+      started_at:    startedAt,
+      finished_at:   failAt,
+      status:        "failed",
+      items_in:      0,
+      items_out:     0,
+      errors:        1,
+      error_message: errMsg,
+      details:       { model: "gpt-4o-mini" },
+    }).catch(() => {});
     await supabase.from("system_health").upsert({
       function_name: "process-news",
       last_error:    errMsg,

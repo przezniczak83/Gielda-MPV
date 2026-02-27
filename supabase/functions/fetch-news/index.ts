@@ -307,13 +307,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   let totalSkipped  = 0;
   const sourceStats: Record<string, { inserted: number; skipped: number; error?: string }> = {};
 
-  // ── Pipeline run logging ───────────────────────────────────────────────────
-  const runRow = await supabase
-    .from("pipeline_runs")
-    .insert({ function_name: "fetch-news", source: "rss-multi", status: "running" })
-    .select("id")
-    .single();
-  const runId = runRow.data?.id as number | undefined;
+  const startedAt = new Date().toISOString();
 
   try {
   // ── STEP 1: Strefa Inwestorów via Railway scraper ────────────────────────
@@ -443,16 +437,16 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     duration_ms:      Date.now() - startTime,
   });
 
-  if (runId) {
-    await supabase.from("pipeline_runs").update({
-      finished_at: doneAt,
-      status:      "success",
-      items_in:    totalInserted + totalSkipped,
-      items_out:   totalInserted,
-      errors:      0,
-      details:     { sources: sourceStats },
-    }).eq("id", runId);
-  }
+  await supabase.from("pipeline_runs").insert({
+    function_name: "fetch-news",
+    started_at:    startedAt,
+    finished_at:   doneAt,
+    status:        "success",
+    items_in:      totalInserted + totalSkipped,
+    items_out:     totalInserted,
+    errors:        0,
+    details:       { sources: sourceStats },
+  }).catch(() => {});
 
   await supabase.from("system_health").upsert({
     function_name:        "fetch-news",
@@ -477,16 +471,16 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     const errMsg = e instanceof Error ? e.message : String(e);
     const failAt = new Date().toISOString();
     console.error("[fetch-news] Fatal:", errMsg);
-    if (runId) {
-      await supabase.from("pipeline_runs").update({
-        finished_at:   failAt,
-        status:        "failed",
-        items_in:      totalInserted + totalSkipped,
-        items_out:     totalInserted,
-        errors:        1,
-        error_message: errMsg,
-      }).eq("id", runId).catch(() => {});
-    }
+    await supabase.from("pipeline_runs").insert({
+      function_name: "fetch-news",
+      started_at:    startedAt,
+      finished_at:   failAt,
+      status:        "failed",
+      items_in:      totalInserted + totalSkipped,
+      items_out:     totalInserted,
+      errors:        1,
+      error_message: errMsg,
+    }).catch(() => {});
     await supabase.from("system_health").upsert({
       function_name: "fetch-news",
       last_error:    errMsg,
