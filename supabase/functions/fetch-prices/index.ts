@@ -12,7 +12,8 @@
 //
 // Deploy: supabase functions deploy fetch-prices --project-ref pftgmorsthoezhmojjpg
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient }       from "https://esm.sh/@supabase/supabase-js@2";
+import { unzipSync }           from "https://esm.sh/fflate@0.8.2";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -402,6 +403,68 @@ async function fetchWithFallback(
   return { rows: [], sourceUsed: "none" };
 }
 
+// ─── Stooq bulk CSV (all GPW stocks in one ZIP download) ─────────────────────
+
+/** Download Stooq's daily_pl.zip and extract OHLCV for all known GPW tickers.
+ *  Returns a map ticker → OHLCV[] (usually 1 row = last available trading day).
+ *  Falls back to empty Map on any error — caller retries with per-ticker chain.
+ */
+async function fetchStooqBulk(knownTickers: Set<string>): Promise<Map<string, OHLCV[]>> {
+  const ZIP_URL = "https://stooq.pl/db/h/daily_pl.zip";
+
+  const res = await fetch(ZIP_URL, {
+    headers: { "User-Agent": BROWSER_UA },
+    signal:  AbortSignal.timeout(45_000),
+  });
+  if (!res.ok) throw new Error(`Stooq bulk: HTTP ${res.status}`);
+
+  const buffer = await res.arrayBuffer();
+  const files  = unzipSync(new Uint8Array(buffer));
+
+  // Find the most recent date in any file (to filter old data)
+  // We accept data from the last 3 trading days
+  const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  const cutoffFmt = cutoff.toISOString().slice(0, 10).replace(/-/g, "");
+
+  const result = new Map<string, OHLCV[]>();
+
+  for (const [filename, content] of Object.entries(files)) {
+    // Filename is like "data/daily/pl/pkn.txt" or just "pkn.txt"
+    const base   = filename.split("/").pop() ?? "";
+    if (!base.endsWith(".txt")) continue;
+
+    const ticker = base.replace(".txt", "").toUpperCase();
+    if (!knownTickers.has(ticker)) continue;
+
+    const text  = new TextDecoder().decode(content as Uint8Array);
+    const lines = text.trim().split("\n").filter(l => l.trim() && !l.startsWith("Date"));
+    if (lines.length === 0) continue;
+
+    // Last line = most recent data; Stooq format: YYYYMMDD,O,H,L,C,V
+    const lastLine = lines[lines.length - 1];
+    const [dateFmt, open, high, low, close, volume] = lastLine.split(",");
+    if (!dateFmt || dateFmt.trim() < cutoffFmt) continue;  // too old
+
+    const closeVal = parseNum(close);
+    if (closeVal === null || closeVal <= 0) continue;
+
+    // Convert YYYYMMDD → YYYY-MM-DD
+    const d = dateFmt.trim();
+    const dateStr = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+
+    result.set(ticker, [{
+      date:   dateStr,
+      open:   parseNum(open),
+      high:   parseNum(high),
+      low:    parseNum(low),
+      close:  closeVal,
+      volume: parseInt_(volume),
+    }]);
+  }
+
+  return result;
+}
+
 // ─── RS Score helpers ─────────────────────────────────────────────────────────
 
 /** Compute RS score (relative to WIG20) and trend for a ticker.
@@ -454,6 +517,14 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     { auth: { persistSession: false } },
   );
 
+  // ── Pipeline run logging ───────────────────────────────────────────────────
+  const runRow = await supabase
+    .from("pipeline_runs")
+    .insert({ function_name: "fetch-prices", source: "railway+stooq", status: "running" })
+    .select("id")
+    .single();
+  const runId = runRow.data?.id as number | undefined;
+
   // ── Fetch companies ────────────────────────────────────────────────────────
   const { data: companies, error: compErr } = await supabase
     .from("companies")
@@ -462,6 +533,12 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
   if (compErr) {
     console.error("[fetch-prices] Companies fetch error:", compErr.message);
+    if (runId) {
+      await supabase.from("pipeline_runs").update({
+        finished_at: new Date().toISOString(), status: "failed",
+        errors: 1, details: { error: compErr.message },
+      }).eq("id", runId);
+    }
     return new Response(
       JSON.stringify({ ok: false, error: compErr.message }),
       { status: 500, headers: { "Content-Type": "application/json" } },
@@ -529,15 +606,35 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     console.log(`[fetch-prices] WIG20 (DB fallback): ${wig20Map.size} price points`);
   }
 
-  // ── Railway batch for all GPW tickers in one HTTP call ────────────────────
-  const gpwBatch = batch.filter(c => c.market === "GPW").map(c => c.ticker);
-  const batchMap = new Map<string, OHLCV[]>();
+  // ── Try Stooq bulk CSV (all GPW prices in one download) ──────────────────
+  const allGpwTickers = new Set(allCompanies.filter(c => c.market === "GPW").map(c => c.ticker));
+  let bulkBatchMap: Map<string, OHLCV[]> | null = null;
+
+  try {
+    const bulkResult = await fetchStooqBulk(allGpwTickers);
+    if (bulkResult.size >= 50) {
+      bulkBatchMap = bulkResult;
+      // Expand batch to ALL GPW companies when bulk succeeds
+      const gpwCompanies  = allCompanies.filter(c => c.market === "GPW");
+      const usaCompanies  = batch.filter(c => c.market !== "GPW");  // keep USA from rotating batch
+      batch = [...gpwCompanies, ...usaCompanies];
+      console.log(`[fetch-prices] Stooq bulk: ${bulkResult.size} GPW tickers — switching to full GPW run`);
+    } else {
+      console.log(`[fetch-prices] Stooq bulk: only ${bulkResult.size} tickers — skipping bulk`);
+    }
+  } catch (err) {
+    console.warn(`[fetch-prices] Stooq bulk failed: ${err instanceof Error ? err.message : err} — using Railway batch`);
+  }
+
+  // ── Railway batch for GPW tickers not covered by bulk ─────────────────────
+  const gpwBatch = batch.filter(c => c.market === "GPW" && !(bulkBatchMap?.has(c.ticker))).map(c => c.ticker);
+  const batchMap = new Map<string, OHLCV[]>(bulkBatchMap ?? []);
 
   if (gpwBatch.length > 0) {
     try {
       const fetched = await fetchRailwayBatch(gpwBatch);
       for (const [t, rows] of fetched) batchMap.set(t, rows);
-      console.log(`[fetch-prices] Railway batch: ${fetched.size}/${gpwBatch.length} tickers fetched`);
+      console.log(`[fetch-prices] Railway batch: ${fetched.size}/${gpwBatch.length} remaining tickers`);
     } catch (err) {
       console.warn(`[fetch-prices] Railway batch failed: ${err instanceof Error ? err.message : err}`);
     }
@@ -617,7 +714,19 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     console.log(`[fetch-prices] ${ticker}: upserted ${priceRows.length} rows (source=${sourceUsed}) ✓`);
   }
 
+  const failedCount = results.filter(r => r.rows_upserted === 0 && r.source_used === "none").length;
   console.log(`[fetch-prices] Done: total_rows=${totalRows}`);
+
+  if (runId) {
+    await supabase.from("pipeline_runs").update({
+      finished_at: new Date().toISOString(),
+      status:      failedCount === 0 ? "success" : "failed",
+      items_in:    batch.length,
+      items_out:   results.filter(r => r.rows_upserted > 0).length,
+      errors:      failedCount,
+      details:     { offset_from: currentOffset, offset_to: nextOffset, total_rows: totalRows },
+    }).eq("id", runId);
+  }
 
   return new Response(
     JSON.stringify({

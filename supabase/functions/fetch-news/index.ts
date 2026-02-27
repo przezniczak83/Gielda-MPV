@@ -307,6 +307,14 @@ Deno.serve(async (_req: Request): Promise<Response> => {
   let totalSkipped  = 0;
   const sourceStats: Record<string, { inserted: number; skipped: number; error?: string }> = {};
 
+  // ── Pipeline run logging ───────────────────────────────────────────────────
+  const runRow = await supabase
+    .from("pipeline_runs")
+    .insert({ function_name: "fetch-news", source: "rss-multi", status: "running" })
+    .select("id")
+    .single();
+  const runId = runRow.data?.id as number | undefined;
+
   // ── STEP 1: Strefa Inwestorów via Railway scraper ────────────────────────
   const scraperUrl = Deno.env.get("RAILWAY_SCRAPER_URL");
   const scraperKey = Deno.env.get("RAILWAY_SCRAPER_KEY") ?? "";
@@ -422,16 +430,28 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     console.log(`[fetch-news] ${source.name}: +${srcInserted} inserted, ${srcSkipped} skipped`);
   }
 
-  // ── Write ingestion_log ──────────────────────────────────────────────────
+  // ── Write ingestion_log + pipeline_runs ──────────────────────────────────
+  const doneAt = new Date().toISOString();
   await supabase.from("ingestion_log").insert({
     source_name:      "fetch-news",
     status:           "success",
     messages_fetched: totalInserted + totalSkipped,
     messages_new:     totalInserted,
     messages_failed:  0,
-    finished_at:      new Date().toISOString(),
+    finished_at:      doneAt,
     duration_ms:      Date.now() - startTime,
   });
+
+  if (runId) {
+    await supabase.from("pipeline_runs").update({
+      finished_at: doneAt,
+      status:      "success",
+      items_in:    totalInserted + totalSkipped,
+      items_out:   totalInserted,
+      errors:      0,
+      details:     { sources: sourceStats },
+    }).eq("id", runId);
+  }
 
   console.log(`[fetch-news] Done: +${totalInserted} inserted, ${totalSkipped} skipped, ms=${Date.now() - startTime}`);
 

@@ -81,7 +81,81 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ─── ZMIANA D: Heuristic with per-ticker confidence ───────────────────────────
+// ─── Evidence types ───────────────────────────────────────────────────────────
+
+interface TickerEvidence {
+  alias:    string;
+  ticker:   string;
+  source:   "title" | "body";
+  position: number;
+}
+
+interface DeterministicMatch {
+  ticker:     string;
+  confidence: number;
+  evidence:   TickerEvidence[];
+}
+
+// ─── ETAP 3: Deterministic ticker matcher (word-boundary regex) ──────────────
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Deterministic matcher using strict word-boundary regex.
+ *  Returns matches sorted by confidence descending.
+ *  When confidence >= 0.85 for at least one ticker, AI should skip ticker
+ *  identification and only generate summary/sentiment/impact.
+ */
+function deterministicMatch(
+  title:        string,
+  body:         string | null,
+  aliasMap:     Map<string, string>,
+  validTickers: Set<string>,
+): DeterministicMatch[] {
+  const titleLower = title.toLowerCase();
+  const bodyLower  = (body ?? "").toLowerCase();
+  const matchMap   = new Map<string, DeterministicMatch>();
+
+  // Sort aliases by length descending (longest / most specific first)
+  const sorted = [...aliasMap.entries()]
+    .filter(([alias]) => alias.length >= 4)
+    .sort((a, b) => b[0].length - a[0].length);
+
+  for (const [alias, ticker] of sorted) {
+    if (!validTickers.has(ticker)) continue;
+
+    const escaped = escapeRegex(alias);
+    const re      = new RegExp(`\\b${escaped}\\b`, "gi");
+
+    const titleMatches = [...titleLower.matchAll(re)];
+    const bodyMatches  = [...bodyLower.matchAll(re)];
+
+    if (titleMatches.length === 0 && bodyMatches.length === 0) continue;
+
+    const existing = matchMap.get(ticker);
+
+    // Confidence: title match = 0.9, body only = 0.7; boost for long alias
+    let confidence = titleMatches.length > 0
+      ? (alias.length >= 8 ? 0.92 : alias.length >= 6 ? 0.90 : 0.85)
+      : (alias.length >= 8 ? 0.75 : alias.length >= 6 ? 0.72 : 0.68);
+
+    const evidence: TickerEvidence[] = [
+      ...titleMatches.map(m => ({ alias, ticker, source: "title" as const, position: m.index ?? 0 })),
+      ...bodyMatches.map(m =>  ({ alias, ticker, source: "body"  as const, position: m.index ?? 0 })),
+    ];
+
+    if (!existing || confidence > existing.confidence) {
+      matchMap.set(ticker, { ticker, confidence, evidence });
+    }
+
+    if (matchMap.size >= 5) break;  // max 5 from deterministic
+  }
+
+  return [...matchMap.values()].sort((a, b) => b.confidence - a.confidence);
+}
+
+// ─── ZMIANA D: Heuristic alias (kept for compatibility, now wraps deterministicMatch) ───
 
 function extractTickersHeuristic(
   title:        string,
@@ -89,39 +163,12 @@ function extractTickersHeuristic(
   aliasMap:     Map<string, string>,
   validTickers: Set<string>,
 ): Map<string, number> {
-  const fullText  = (title + " " + (body ?? "")).toLowerCase();
-  const titleText = title.toLowerCase();
-  const found     = new Map<string, number>();  // ticker → confidence
-
-  // Sort aliases by length descending (longest / most specific first)
-  const sorted = [...aliasMap.entries()]
-    .filter(([alias]) => alias.length >= 4)    // min 4 chars — no noise
-    .sort((a, b) => b[0].length - a[0].length);
-
-  for (const [alias, ticker] of sorted) {
-    if (!validTickers.has(ticker)) continue;
-    if (found.has(ticker)) continue;           // already found with higher confidence
-
-    // Strict word-boundary check
-    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re      = new RegExp(`(?:^|[\\s,\\.\\(\\[\"'])${escaped}(?:$|[\\s,\\.\\)\\]\"'])`, "i");
-
-    if (!re.test(fullText)) continue;
-
-    // Base confidence by alias length
-    let conf =
-      alias.length >= 8 ? HEUR_CONF_LONG :
-      alias.length >= 6 ? HEUR_CONF_MEDIUM :
-                          HEUR_CONF_SHORT;
-
-    // Boost if found in title specifically
-    if (re.test(titleText)) conf = Math.min(conf + HEUR_CONF_TITLE_BOOST, 0.95);
-
-    found.set(ticker, conf);
-    if (found.size >= 3) break;  // max 3 from heuristic
+  const matches = deterministicMatch(title, body, aliasMap, validTickers);
+  const result  = new Map<string, number>();
+  for (const m of matches.slice(0, 3)) {
+    result.set(m.ticker, m.confidence);
   }
-
-  return found;
+  return result;
 }
 
 // ─── ZMIANA F: Stricter AI Analysis with confidence ───────────────────────────
@@ -310,6 +357,16 @@ interface ProcessResult {
   error?: string;
 }
 
+// ─── Generic summary templates (detect hallucinated summaries) ────────────────
+
+const GENERIC_TEMPLATES = [
+  "ogłosił wyniki q",
+  "poinformowała o wynikach",
+  "podała do wiadomości",
+  "spółka poinformowała",
+  "zarząd spółki poinformował",
+];
+
 async function processItem(
   item:         NewsItem,
   supabase:     SupabaseClient,
@@ -317,13 +374,21 @@ async function processItem(
   validTickers: Set<string>,
   openaiKey:    string,
 ): Promise<ProcessResult> {
-  // ZMIANA D: Heuristic with per-ticker confidence (for non-ESPI sources)
-  const heuristicMap = extractTickersHeuristic(item.title, item.summary, aliasMap, validTickers);
-
   const isEspi = item.source === "espi";
 
+  // ── ETAP 3 Step 1: Deterministic matching ─────────────────────────────────
+  const deterministicResults = deterministicMatch(
+    item.title,
+    item.body_text ?? item.summary,
+    aliasMap,
+    validTickers,
+  );
+
+  // Best deterministic confidence (ignoring ESPI — those are always certain)
+  const topDetConf   = deterministicResults[0]?.confidence ?? 0;
+  const useDeterminist = !isEspi && topDetConf >= 0.85;
+
   // ESPI pre-assigned tickers (set by fetch-espi with confidence 1.0)
-  // These were extracted from the URL/title and are authoritative — do NOT let AI override them
   const espiPresetTickers: string[] = [];
   if (isEspi && item.tickers && item.tickers.length > 0) {
     for (const t of item.tickers) {
@@ -331,7 +396,13 @@ async function processItem(
     }
   }
 
-  // Paywall filter — skip AI for paywalled sources with no body content
+  // Build heuristic map for fallback
+  const heuristicMap = new Map<string, number>();
+  for (const m of deterministicResults.slice(0, 3)) {
+    heuristicMap.set(m.ticker, m.confidence);
+  }
+
+  // ── Paywall filter — skip AI for paywalled sources with no body ────────────
   const hasContent = !!(item.body_text || (item.summary && item.summary.length >= 100));
   if (PAYWALL_SOURCES.includes(item.source) && !hasContent) {
     const heurTickers = [...heuristicMap.keys()];
@@ -345,6 +416,9 @@ async function processItem(
       ai_summary:        item.title.slice(0, 300),
       ticker_confidence: paywallConf,
       relevance_score:   heurTickers.length > 0 ? 0.5 : 0.3,
+      ticker_method:     heurTickers.length > 0 ? "deterministic" : null,
+      ticker_evidence:   deterministicResults.flatMap(m => m.evidence).slice(0, 20),
+      ticker_version:    2,
     };
     if (heurTickers.length > 0) paywallUpdate.tickers = heurTickers;
     await supabase.from("news_items").update(paywallUpdate).eq("id", item.id);
@@ -360,14 +434,54 @@ async function processItem(
     console.warn(`[process-news] item ${item.id} AI error: ${msg}`);
   }
 
+  // ── ETAP 3 Step 2: Validate AI output ─────────────────────────────────────
+  if (analysis) {
+    // 1. Filter tickers to valid companies only
+    analysis.tickers = analysis.tickers.filter(t => validTickers.has(t));
+    const validatedConf: Record<string, number> = {};
+    for (const [t, c] of Object.entries(analysis.ticker_confidence)) {
+      if (validTickers.has(t)) {
+        validatedConf[t] = Math.max(0, Math.min(1, c));
+      }
+    }
+    analysis.ticker_confidence = validatedConf;
+
+    // 2. Clamp scores
+    analysis.sentiment      = Math.max(-1, Math.min(1, analysis.sentiment));
+    analysis.impact_score   = Math.max(1,  Math.min(10, Math.round(analysis.impact_score)));
+    analysis.relevance_score = Math.max(0, Math.min(1, analysis.relevance_score));
+
+    // 3. Detect generic/hallucinated summaries
+    const summaryLower = (analysis.ai_summary ?? "").toLowerCase();
+    const isGeneric    = GENERIC_TEMPLATES.some(t => summaryLower.includes(t));
+    if (isGeneric) {
+      console.warn(`[process-news] item ${item.id}: generic summary detected, using fallback`);
+      const content = item.body_text ?? item.summary ?? "";
+      analysis.ai_summary = content.length >= 80
+        ? content.slice(0, 250)
+        : item.title.slice(0, 250);
+    }
+
+    // 4. If deterministic already found confident tickers, prefer them
+    if (useDeterminist && deterministicResults.length > 0) {
+      // Only use AI tickers if they have very high AI confidence AND aren't already found
+      const detSet = new Set(deterministicResults.map(m => m.ticker));
+      analysis.tickers = [
+        ...deterministicResults.map(m => m.ticker),
+        ...analysis.tickers.filter(t => !detSet.has(t) && (analysis!.ticker_confidence[t] ?? 0) >= 0.85),
+      ].slice(0, 5);
+    }
+  }
+
   // ── Build final ticker confidence map ─────────────────────────────────────
 
   let mergedConf: Record<string, number> = {};
   let finalTickers: string[] = [];
+  let tickerMethod: string | null = null;
+  const tickerEvidence: TickerEvidence[] = [];
 
   if (isEspi && espiPresetTickers.length > 0) {
     // ESPI with pre-assigned tickers: trust fetch-espi's extraction (confidence 1.0)
-    // Still incorporate AI tickers if AI is very confident about additional companies
     for (const t of espiPresetTickers) {
       mergedConf[t] = ESPI_CONFIDENCE;
     }
@@ -379,9 +493,24 @@ async function processItem(
         }
       }
     }
+    tickerMethod = "espi_url";
+  } else if (useDeterminist) {
+    // Deterministic matching succeeded with high confidence — use it
+    for (const m of deterministicResults) {
+      mergedConf[m.ticker] = m.confidence;
+      tickerEvidence.push(...m.evidence.slice(0, 3));
+    }
+    // Still merge AI scores (take max)
+    if (analysis) {
+      for (const [t, c] of Object.entries(analysis.ticker_confidence)) {
+        if (validTickers.has(t) && c >= DISPLAY_THRESHOLD) {
+          mergedConf[t] = Math.max(mergedConf[t] ?? 0, c);
+        }
+      }
+    }
+    tickerMethod = "deterministic";
   } else {
-    // Non-ESPI or ESPI without pre-assigned tickers: use heuristic + AI
-    // Start with heuristic confidences
+    // Non-ESPI or low-confidence deterministic: use heuristic + AI
     for (const [t, c] of heuristicMap) {
       if (validTickers.has(t)) mergedConf[t] = c;
     }
@@ -401,12 +530,13 @@ async function processItem(
         }
       }
     }
+    tickerMethod = "ai";
   }
 
   // Only save tickers with confidence >= display threshold
   finalTickers = Object.entries(mergedConf)
     .filter(([, c]) => c >= DISPLAY_THRESHOLD)
-    .sort((a, b) => b[1] - a[1])  // highest confidence first
+    .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([t]) => t);
 
@@ -414,6 +544,9 @@ async function processItem(
   const update: Record<string, unknown> = {
     ai_processed:      true,
     ticker_confidence: mergedConf,
+    ticker_method:     tickerMethod,
+    ticker_evidence:   tickerEvidence.length > 0 ? tickerEvidence : undefined,
+    ticker_version:    2,
   };
   // ESPI always has relevance 1.0; for others derive from analysis or heuristic
   const relevanceScore: number = isEspi
@@ -513,6 +646,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const limit = isTriggered ? TRIGGER_BATCH : BATCH_SIZE;
   if (isTriggered) console.log(`[process-news] Trigger mode — limit=${limit}`);
 
+  // ── Pipeline run logging ───────────────────────────────────────────────────
+  const runRow = await supabase
+    .from("pipeline_runs")
+    .insert({ function_name: "process-news", source: "gpt-4o-mini", status: "running" })
+    .select("id")
+    .single();
+  const runId = runRow.data?.id as number | undefined;
+
   // ── Load ticker_aliases for heuristic matching ────────────────────────────
   const { data: aliasRows } = await supabase
     .from("ticker_aliases")
@@ -589,16 +730,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
-  // ── Write ingestion_log ───────────────────────────────────────────────────
+  // ── Write ingestion_log + pipeline_runs ───────────────────────────────────
+  const doneAt = new Date().toISOString();
   await supabase.from("ingestion_log").insert({
     source_name:      "process-news",
     status:           failed === 0 ? "success" : "partial_failure",
     messages_fetched: batch.length,
     messages_new:     processed,
     messages_failed:  failed,
-    finished_at:      new Date().toISOString(),
+    finished_at:      doneAt,
     duration_ms:      Date.now() - startTime,
   });
+
+  if (runId) {
+    await supabase.from("pipeline_runs").update({
+      finished_at: doneAt,
+      status:      failed === 0 ? "success" : "failed",
+      items_in:    batch.length,
+      items_out:   processed,
+      errors:      failed,
+    }).eq("id", runId);
+  }
 
   console.log(`[process-news] Done: processed=${processed}, failed=${failed}, total=${batch.length}, ms=${Date.now() - startTime}`);
 

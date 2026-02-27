@@ -335,6 +335,17 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
+  // ── Pipeline run logging ───────────────────────────────────────────────────
+  const runRow = await supabase
+    .from("pipeline_runs")
+    .insert({ function_name: "fetch-espi", source: "bankier-espi", status: "running" })
+    .select("id")
+    .single();
+  const runId = runRow.data?.id as number | undefined;
+
+  let itemsOut = 0;
+  let runErrors = 0;
+
   // ── Load company index for emitter matching ────────────────────────────────
   const { data: companies, error: compErr } = await supabase
     .from("companies")
@@ -410,6 +421,12 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
   if (error) {
     console.error("[fetch-espi] Insert error:", error.message);
+    if (runId) {
+      await supabase.from("pipeline_runs").update({
+        finished_at: new Date().toISOString(), status: "failed",
+        errors: runErrors + 1, details: { error: error.message },
+      }).eq("id", runId);
+    }
     return new Response(
       JSON.stringify({ ok: false, error: error.message }),
       { status: 500, headers: { "Content-Type": "application/json" } },
@@ -454,6 +471,8 @@ Deno.serve(async (_req: Request): Promise<Response> => {
           impact_score:      8,
           ai_processed:      false,
           telegram_sent:     false,
+          ticker_method:     record.tickers.length > 0 ? "espi_url" : undefined,
+          ticker_version:    1,
           // KROK 4: store body text + PDF attachments
           body_text:    record.body_text,
           attachments:  record.attachments.length > 0 ? record.attachments : undefined,
@@ -463,14 +482,27 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       if (newsErr) {
         console.error(`[fetch-espi] Bridge error for ${record.tickers.join(",")}: ${newsErr.message}`, newsErr.details ?? "");
         newsFailed++;
+        runErrors++;
       } else if (upsertData && upsertData.length > 0) {
         newsInserted++;
+        itemsOut++;
       } else {
         newsSkipped++;
       }
     }
 
     console.log(`[fetch-espi] Bridge: +${newsInserted} inserted, ${newsSkipped} updated, ${newsFailed} failed`);
+  }
+
+  // ── Mark pipeline run success ──────────────────────────────────────────────
+  if (runId) {
+    await supabase.from("pipeline_runs").update({
+      finished_at: new Date().toISOString(),
+      status:      runErrors === 0 ? "success" : "failed",
+      items_in:    totalItems,
+      items_out:   itemsOut,
+      errors:      runErrors,
+    }).eq("id", runId);
   }
 
   return new Response(
