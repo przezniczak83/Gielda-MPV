@@ -86,6 +86,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
+function clamp(val: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, val));
+}
+
 // ─── Evidence types ───────────────────────────────────────────────────────────
 
 interface TickerEvidence {
@@ -271,9 +275,15 @@ Odpowiedz TYLKO tym JSON (bez markdown, bez komentarzy):
 
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(raw) as Record<string, unknown>;
+    // response_format: json_object should guarantee valid JSON, but handle
+    // rare cases where the model wraps output in markdown code blocks.
+    const jsonStr =
+      raw.match(/```json?\s*([\s\S]*?)```/)?.[1]?.trim() ??
+      raw.match(/\{[\s\S]*\}/)?.[0] ??
+      raw;
+    parsed = JSON.parse(jsonStr) as Record<string, unknown>;
   } catch {
-    throw new Error(`JSON parse failed: ${raw.slice(0, 100)}`);
+    throw new Error(`JSON parse failed: ${raw.slice(0, 200)}`);
   }
 
   // Sanitize ticker_confidence
@@ -362,6 +372,24 @@ interface ProcessResult {
   error?: string;
 }
 
+// ─── AI ticker validation ─────────────────────────────────────────────────────
+
+/** Filter AI-returned tickers against the known-companies set.
+ *  Logs any ticker not present in the DB so hallucinations are visible in logs. */
+function validateAITickers(
+  aiTickers: string[],
+  validSet:  Set<string>,
+  itemId:    number,
+): string[] {
+  if (!aiTickers || aiTickers.length === 0) return [];
+  const validated = aiTickers.filter(t => validSet.has(t));
+  const rejected  = aiTickers.filter(t => !validSet.has(t));
+  if (rejected.length > 0) {
+    console.warn(`[process-news] item ${itemId}: AI hallucinated tickers: ${rejected.join(", ")}`);
+  }
+  return validated;
+}
+
 // ─── Generic summary templates (detect hallucinated summaries) ────────────────
 
 const GENERIC_TEMPLATES = [
@@ -433,16 +461,19 @@ async function processItem(
 
   // ── Step 3: Validate + clamp AI output ───────────────────────────────────
   if (analysis) {
-    analysis.tickers = analysis.tickers.filter(t => validTickers.has(t));
+    // Validate tickers — log any hallucinations (unknown tickers)
+    analysis.tickers = validateAITickers(analysis.tickers, validTickers, item.id);
+
+    // Sanitize ticker_confidence: only known tickers, clamped 0–1
     const validatedConf: Record<string, number> = {};
     for (const [t, c] of Object.entries(analysis.ticker_confidence)) {
-      if (validTickers.has(t)) validatedConf[t] = Math.max(0, Math.min(1, c));
+      if (validTickers.has(t)) validatedConf[t] = clamp(c, 0, 1);
     }
     analysis.ticker_confidence = validatedConf;
 
-    analysis.sentiment       = Math.max(-1, Math.min(1, analysis.sentiment));
-    analysis.impact_score    = Math.max(1,  Math.min(10, Math.round(analysis.impact_score)));
-    analysis.relevance_score = Math.max(0,  Math.min(1, analysis.relevance_score));
+    analysis.sentiment       = clamp(analysis.sentiment, -1, 1);
+    analysis.impact_score    = clamp(Math.round(analysis.impact_score), 1, 10);
+    analysis.relevance_score = clamp(analysis.relevance_score, 0, 1);
 
     // Detect hallucinated summaries
     const summaryLower = (analysis.ai_summary ?? "").toLowerCase();
@@ -491,13 +522,13 @@ async function processItem(
   } else {
     // AI needed — use AI tickers as primary
     if (analysis) {
-      const aiTickers = analysis.tickers.filter(t => validTickers.has(t));
-      for (const t of aiTickers) {
+      // analysis.tickers already validated in Step 3 — no extra DB call needed
+      for (const t of analysis.tickers) {
         mergedConf[t] = analysis.ticker_confidence[t] ?? 0.75;
       }
-      // Supplement with AI conf map
+      // Supplement with AI conf map (already sanitized in Step 3)
       for (const [t, c] of Object.entries(analysis.ticker_confidence)) {
-        if (validTickers.has(t) && c >= DISPLAY_THRESHOLD) {
+        if (c >= DISPLAY_THRESHOLD) {
           mergedConf[t] = Math.max(mergedConf[t] ?? 0, c);
         }
       }
