@@ -739,7 +739,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     last_success_at:      doneAt,
     items_processed:      processed,
     consecutive_failures: 0,
-  }, { onConflict: "function_name" }).catch(() => {});
+  }, { onConflict: "function_name" }).then(({ error }) => {
+    if (error) console.error("[process-news] system_health upsert error:", error.message);
+  });
 
   console.log(`[process-news] Done: processed=${processed}, failed=${failed}, total=${batch.length}, ms=${Date.now() - startTime}`);
 
@@ -773,7 +775,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       function_name: "process-news",
       last_error:    errMsg,
       last_error_at: failAt,
-    }, { onConflict: "function_name" }).catch(() => {});
+    }, { onConflict: "function_name" }).then(({ error }) => {
+      if (error) console.error("[process-news] system_health upsert error:", error.message);
+    });
     return new Response(
       JSON.stringify({ ok: false, error: errMsg }),
       { status: 500, headers: { "Content-Type": "application/json" } },

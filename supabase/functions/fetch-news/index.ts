@@ -453,7 +453,9 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     last_success_at:      doneAt,
     items_processed:      totalInserted,
     consecutive_failures: 0,
-  }, { onConflict: "function_name" }).catch(() => {});
+  }, { onConflict: "function_name" }).then(({ error }) => {
+    if (error) console.error("[fetch-news] system_health upsert error:", error.message);
+  });
 
   console.log(`[fetch-news] Done: +${totalInserted} inserted, ${totalSkipped} skipped, ms=${Date.now() - startTime}`);
 
@@ -485,7 +487,9 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       function_name: "fetch-news",
       last_error:    errMsg,
       last_error_at: failAt,
-    }, { onConflict: "function_name" }).catch(() => {});
+    }, { onConflict: "function_name" }).then(({ error }) => {
+      if (error) console.error("[fetch-news] system_health upsert error:", error.message);
+    });
     return new Response(
       JSON.stringify({ ok: false, error: errMsg }),
       { status: 500, headers: { "Content-Type": "application/json" } },
