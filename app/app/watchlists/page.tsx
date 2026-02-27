@@ -201,29 +201,46 @@ export default function WatchlistsPage() {
               <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
                 Własne watchlisty
               </h2>
-              <div className="rounded-xl border border-gray-800 overflow-hidden divide-y divide-gray-800/60">
-                {lists.map(list => (
+              {lists.length === 0 ? (
+                <div className="rounded-xl border border-gray-800 bg-gray-900/40 py-14 px-6 text-center">
+                  <div className="text-3xl mb-3">★</div>
+                  <h3 className="text-white font-semibold mb-1.5">Brak obserwowanych spółek</h3>
+                  <p className="text-gray-500 text-sm mb-5 max-w-sm mx-auto">
+                    Dodaj spółki do obserwowanych klikając ★ na stronie dowolnej spółki,
+                    np.{" "}
+                    <Link href="/companies/PKN" className="text-blue-400 hover:underline">PKN Orlen</Link>{" "}
+                    lub{" "}
+                    <Link href="/companies/MBK" className="text-blue-400 hover:underline">mBank</Link>.
+                  </p>
                   <Link
-                    key={list.id}
-                    href={`/watchlists/${list.id}`}
-                    className="flex items-center gap-4 px-5 py-4 hover:bg-gray-900/60 transition-colors"
+                    href="/companies"
+                    className="inline-block px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors"
                   >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-white truncate">{list.name}</div>
-                      {list.description && (
-                        <div className="text-xs text-gray-500 mt-0.5 truncate">{list.description}</div>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-500 tabular-nums shrink-0">
-                      {list.item_count} spółek
-                    </div>
-                    <span className="text-gray-600">→</span>
+                    Przeglądaj spółki
                   </Link>
-                ))}
-                {!lists.length && (
-                  <div className="py-16 text-center text-gray-600">Brak watchlist</div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-gray-800 overflow-hidden divide-y divide-gray-800/60">
+                  {lists.map(list => (
+                    <Link
+                      key={list.id}
+                      href={`/watchlists/${list.id}`}
+                      className="flex items-center gap-4 px-5 py-4 hover:bg-gray-900/60 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-white truncate">{list.name}</div>
+                        {list.description && (
+                          <div className="text-xs text-gray-500 mt-0.5 truncate">{list.description}</div>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500 tabular-nums shrink-0">
+                        {list.item_count} spółek
+                      </div>
+                      <span className="text-gray-600">→</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
 
           </div>

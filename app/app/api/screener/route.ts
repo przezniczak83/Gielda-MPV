@@ -47,10 +47,10 @@ interface ScreenerRequest {
 interface SnapshotRow {
   ticker:     string;
   snapshot:   {
-    company?:    { name: string; sector: string | null; market: string };
-    price?:      { close: number; date: string } | null;
-    change_pct?: number | null;
-    kpis?:       { health_score?: number | null };
+    company?:         { name: string; sector: string | null; market: string };
+    price?:           { close: number; date: string; change_pct?: number | null } | null;
+    health_score?:    number | null;
+    moat_score?:      number | null;
   };
   computed_at: string;
 }
@@ -155,8 +155,8 @@ export async function POST(req: NextRequest) {
     sector:      r.snapshot.company?.sector ?? null,
     market:      r.snapshot.company?.market ?? "GPW",
     price:       r.snapshot.price?.close ?? null,
-    change_pct:  r.snapshot.change_pct ?? null,
-    health:      r.snapshot.kpis?.health_score ?? null,
+    change_pct:  r.snapshot.price?.change_pct ?? null,
+    health:      r.snapshot.health_score ?? null,
     computed_at: r.computed_at,
   }));
 
