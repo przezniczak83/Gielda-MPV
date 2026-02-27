@@ -524,6 +524,21 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       continue;
     }
 
+    // Update companies.last_price + change_1d from newest two rows
+    const sorted = [...priceRows].sort((a, b) => b.date.localeCompare(a.date));
+    const latest = sorted[0];
+    const prev   = sorted[1];
+    if (latest?.close != null) {
+      const change1d = (prev?.close != null && prev.close > 0)
+        ? Math.round(((latest.close - prev.close) / prev.close * 100) * 10000) / 10000
+        : null;
+      await supabase.from("companies").update({
+        last_price:       latest.close,
+        change_1d:        change1d,
+        price_updated_at: new Date().toISOString(),
+      }).eq("ticker", ticker);
+    }
+
     results.push({ ticker, rows_upserted: priceRows.length, source_used: sourceUsed });
     totalRows += priceRows.length;
     console.log(`[fetch-prices] ${ticker}: upserted ${priceRows.length} rows (source=${sourceUsed}) ✓`);

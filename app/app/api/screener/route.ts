@@ -85,12 +85,13 @@ export async function POST(req: NextRequest) {
 
   const db = supabase();
 
-  // Fetch all snapshots (max 200 rows) — filter in JS for JSONB fields
+  // Fetch all snapshots — filter in JS for JSONB fields
   // (Supabase doesn't support complex JSONB filters in the client)
   let query = db
     .from("company_snapshot")
     .select("ticker, snapshot, computed_at")
-    .limit(200);
+    .order("ticker", { ascending: true })
+    .limit(500);
 
   const { data, error } = await query;
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
