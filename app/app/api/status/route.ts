@@ -1,71 +1,118 @@
 // GET /api/status
-// Returns news pipeline health: latest ingestion_log entries + news_items stats.
+// Full pipeline observability: v_pipeline_status, KPIs, DB counts, recent errors.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const supabase = createClient(
+function supabase() {
+  return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } },
   );
+}
 
-  const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const since1h  = new Date(Date.now() -      3600 * 1000).toISOString();
+export async function GET() {
+  try {
+    const db = supabase();
 
-  const [
-    { data: logRows,  error: logErr },
-    { count: total24h },
-    { count: processed24h },
-    { count: total1h },
-    { count: pending },
-    { data: breakingRows },
-  ] = await Promise.all([
-    supabase
-      .from("ingestion_log")
-      .select("source_name, status, messages_fetched, messages_new, messages_failed, error_details, created_at")
-      .order("created_at", { ascending: false })
-      .limit(20),
-    supabase.from("news_items").select("*", { count: "exact", head: true }).gte("created_at", since24h),
-    supabase.from("news_items").select("*", { count: "exact", head: true }).gte("created_at", since24h).eq("ai_processed", true),
-    supabase.from("news_items").select("*", { count: "exact", head: true }).gte("created_at", since1h),
-    supabase.from("news_items").select("*", { count: "exact", head: true }).eq("ai_processed", false),
-    supabase
-      .from("news_items")
-      .select("id, title, source, published_at")
-      .eq("is_breaking", true)
-      .gte("published_at", since24h)
-      .order("published_at", { ascending: false })
-      .limit(5),
-  ]);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const since7d = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
 
-  if (logErr) {
-    return NextResponse.json({ error: logErr.message }, { status: 500 });
+    const [
+      pipelineRes,
+      aiBacklogRes,
+      tickerTotal7dRes,
+      tickerCovered7dRes,
+      pricesTodayRes,
+      dbCompaniesRes,
+      dbNewsRes,
+      dbPriceHistRes,
+      dbEventsRes,
+      recentErrorsRes,
+    ] = await Promise.all([
+      // Pipeline status from view (gracefully empty if tables not yet populated)
+      db.from("v_pipeline_status")
+        .select("function_name, last_success_at, runs_24h, successes_24h, items_out_24h, health"),
+
+      // AI backlog: news not yet processed
+      db.from("news_items")
+        .select("*", { count: "exact", head: true })
+        .eq("ai_processed", false),
+
+      // Ticker coverage: total articles in last 7 days
+      db.from("news_items")
+        .select("*", { count: "exact", head: true })
+        .gte("published_at", since7d),
+
+      // Ticker coverage: articles with tickers assigned (not null)
+      db.from("news_items")
+        .select("*", { count: "exact", head: true })
+        .gte("published_at", since7d)
+        .not("tickers", "is", null),
+
+      // Companies with price updated today
+      db.from("companies")
+        .select("*", { count: "exact", head: true })
+        .gte("price_updated_at", todayStart.toISOString()),
+
+      // DB counts
+      db.from("companies").select("*", { count: "exact", head: true }),
+      db.from("news_items").select("*", { count: "exact", head: true }),
+      db.from("price_history").select("*", { count: "exact", head: true }),
+      db.from("company_events").select("*", { count: "exact", head: true }),
+
+      // Recent pipeline failures
+      db.from("pipeline_runs")
+        .select("function_name, started_at, finished_at, error_message, errors, items_in, items_out")
+        .eq("status", "failed")
+        .order("started_at", { ascending: false })
+        .limit(10),
+    ]);
+
+    const pipeline = (pipelineRes.data ?? []) as Array<{
+      function_name: string;
+      last_success_at: string | null;
+      runs_24h: number;
+      successes_24h: number;
+      items_out_24h: number;
+      health: string;
+    }>;
+
+    // Determine overall health from pipeline statuses
+    let overall: "healthy" | "degraded" | "critical" = "healthy";
+    if (pipeline.some(p => p.health === "dead"))                          overall = "critical";
+    else if (pipeline.some(p => p.health === "degraded" || p.health === "stale")) overall = "degraded";
+
+    const totalNews7d   = tickerTotal7dRes.count   ?? 0;
+    const coveredNews7d = tickerCovered7dRes.count  ?? 0;
+    const tickerCoverage7d = totalNews7d > 0
+      ? Math.round((coveredNews7d / totalNews7d) * 100)
+      : null;
+
+    return NextResponse.json({
+      overall,
+      ts: new Date().toISOString(),
+      pipeline,
+      kpi: {
+        ai_backlog:          aiBacklogRes.count    ?? 0,
+        ticker_coverage_7d:  tickerCoverage7d,
+        prices_updated_today: pricesTodayRes.count ?? 0,
+        total_news:          dbNewsRes.count       ?? 0,
+      },
+      db: {
+        companies:      dbCompaniesRes.count  ?? 0,
+        news_items:     dbNewsRes.count       ?? 0,
+        price_history:  dbPriceHistRes.count  ?? 0,
+        company_events: dbEventsRes.count     ?? 0,
+      },
+      recent_errors: recentErrorsRes.data ?? [],
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
-
-  // Normalize log rows to a consistent shape for the frontend
-  const log = (logRows ?? []).map(r => ({
-    function_name:   (r as Record<string, unknown>).source_name     as string,
-    status:          (r as Record<string, unknown>).status           as string,
-    items_fetched:   (r as Record<string, unknown>).messages_fetched as number | null,
-    items_processed: (r as Record<string, unknown>).messages_new     as number | null,
-    items_failed:    (r as Record<string, unknown>).messages_failed  as number | null,
-    error_message:   ((r as Record<string, unknown>).error_details as { message?: string } | null)?.message ?? null,
-    created_at:      (r as Record<string, unknown>).created_at       as string,
-  }));
-
-  return NextResponse.json({
-    pipeline: {
-      total_24h:     total24h    ?? 0,
-      processed_24h: processed24h ?? 0,
-      total_1h:      total1h     ?? 0,
-      pending_ai:    pending     ?? 0,
-    },
-    breaking_24h: breakingRows ?? [],
-    log,
-    ts: new Date().toISOString(),
-  });
 }
