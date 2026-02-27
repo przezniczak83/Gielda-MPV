@@ -7,6 +7,7 @@
 //   3. STUB_RECORDS    — fallback so cron never fails silently
 //
 // KROK 4: extracts body_text + PDF attachments from RSS <description>
+// NAPRAWA A: extracts emitter from URL/title and matches to company index
 //
 // Deploy: supabase functions deploy fetch-espi --project-ref pftgmorsthoezhmojjpg
 
@@ -22,26 +23,33 @@ interface EspiAttachment {
 }
 
 interface EspiRecord {
-  ticker:       string;
-  title:        string;
-  url:          string | null;
-  published_at: string | null;
-  body_text:    string | null;
-  attachments:  EspiAttachment[];
+  tickers:           string[];
+  ticker_confidence: Record<string, number>;
+  title:             string;
+  url:               string | null;
+  published_at:      string | null;
+  body_text:         string | null;
+  attachments:       EspiAttachment[];
+}
+
+interface CompanyEntry {
+  ticker:     string;
+  normalized: string[];
 }
 
 // ─── Stub fallback ────────────────────────────────────────────────────────────
 
-const STUB_RECORDS: EspiRecord[] = [
-  {
-    ticker:       "PKN",
-    title:        "ESPI stub: fallback — wszystkie źródła RSS niedostępne",
-    url:          null,
-    published_at: new Date().toISOString(),
-    body_text:    null,
-    attachments:  [],
-  },
-];
+function makeStub(): EspiRecord {
+  return {
+    tickers:           [],
+    ticker_confidence: {},
+    title:             "ESPI stub: fallback — wszystkie źródła RSS niedostępne",
+    url:               null,
+    published_at:      new Date().toISOString(),
+    body_text:         null,
+    attachments:       [],
+  };
+}
 
 // ─── RSS helpers ──────────────────────────────────────────────────────────────
 
@@ -69,22 +77,6 @@ function splitItems(xml: string): string[] {
   return items;
 }
 
-/** Try to extract ticker from title/description against known watchlist. */
-function extractTicker(
-  title:       string,
-  description: string,
-  tickers:     Set<string>,
-): string | null {
-  const companyPart = title.split(":")[0].toUpperCase();
-  const words = companyPart.match(/\b[A-Z0-9]{2,6}\b/g) ?? [];
-  for (const w of words) {
-    if (tickers.has(w)) return w;
-  }
-  const pdfMatch = description.match(/\b([A-Z0-9]{2,6})_[A-Z0-9]/);
-  if (pdfMatch && tickers.has(pdfMatch[1])) return pdfMatch[1];
-  return null;
-}
-
 /** Parse RSS pubDate to ISO string. */
 function parsePubDate(raw: string): string | null {
   try {
@@ -93,6 +85,91 @@ function parsePubDate(raw: string): string | null {
   } catch {
     return null;
   }
+}
+
+// ─── NAPRAWA A: Emitter extraction + company matching ─────────────────────────
+
+/** Normalize a company name for fuzzy matching. */
+function normalizeCompanyName(name: string): string {
+  return name.toLowerCase()
+    .replace(/\s+s\.a\.?\s*$/gi, "")
+    .replace(/\s+s\.?a\s*$/gi, "")
+    .replace(/\s+se\s*$/gi, "")
+    .replace(/\s+sp\.\s*z\s*o\.o\.?\s*$/gi, "")
+    .replace(/\s+s\.k\.a\.?\s*$/gi, "")
+    .replace(/\s+s\.c\.?\s*$/gi, "")
+    .replace(/\s+nv\s*$/gi, "")
+    .replace(/\s+plc\s*$/gi, "")
+    .replace(/\s+ltd\.?\s*$/gi, "")
+    .replace(/\s+inc\.?\s*$/gi, "")
+    .replace(/\s+holding[s]?\s*$/gi, "")
+    .replace(/\s+group\s*$/gi, "")
+    .replace(/[.,\-()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Extract emitter name from Bankier ESPI URL.
+ *  bankier.pl/wiadomosc/AMREST-Wyniki-finansowe-RR-2025-... → "AMREST"
+ *  bankier.pl/wiadomosc/PKN-ORLEN-S-A-Wyniki-... → "PKN ORLEN S A"
+ */
+function extractEmitterFromUrl(url: string): string | null {
+  const bankierMatch = url.match(
+    /wiadomosc\/(.+?)-(?:Wyniki|Raport|Sprawozdanie|Zawarcie|Nabycie|Zbycie|Emisja|Skup|Zmiana|Informacja|Komunikat|Powolanie|Rezygnacja|Rezygnacja|Ogłoszenie|Zwolanie|Zwołanie|Dane|Korekta|Uzupelnienie|Informacja|Uchwala|Aktualizacja|Lista|Nabycie|Rejestracja|Zmiana)/i
+  );
+  if (bankierMatch) {
+    return bankierMatch[1].replace(/-/g, " ").trim();
+  }
+  return null;
+}
+
+/** Extract emitter from ESPI title (everything before the first dash or colon). */
+function extractEmitterFromTitle(title: string): string | null {
+  // "AMREST S.A. - Wyniki finansowe RR /2025" → "AMREST S.A."
+  // "PKN ORLEN S.A.: Wyniki finansowe QSr 4/2025" → "PKN ORLEN S.A."
+  // "mBank S.A. – Wyniki finansowe SRR /2025" → "mBank S.A."
+  const match = title.match(/^([^–\-:]+?)\s*[–\-:]/);
+  if (match && match[1].trim().length >= 2) {
+    return match[1].trim();
+  }
+  return null;
+}
+
+/** Find the best matching ticker for a company emitter name. */
+function findTickerForEmitter(
+  emitterRaw: string,
+  index: CompanyEntry[],
+): string | null {
+  const emitterNorm = normalizeCompanyName(emitterRaw);
+  if (!emitterNorm || emitterNorm.length < 3) return null;
+
+  let bestTicker: string | null = null;
+  let bestScore = 0;
+
+  for (const company of index) {
+    for (const compNorm of company.normalized) {
+      if (!compNorm || compNorm.length < 2) continue;
+
+      // Exact match
+      if (compNorm === emitterNorm) return company.ticker;
+
+      // Prefix match: company name starts with emitter (e.g. "amrest" vs "amrest holdings se")
+      const prefixScore = compNorm.startsWith(emitterNorm) ? emitterNorm.length / compNorm.length : 0;
+
+      // Substring match — emitter is in company name or vice versa
+      const subScore =
+        (compNorm.includes(emitterNorm) ? emitterNorm.length / compNorm.length : 0) +
+        (emitterNorm.includes(compNorm)  ? compNorm.length / emitterNorm.length  : 0);
+
+      const score = Math.max(prefixScore, subScore);
+
+      if (score > bestScore && score > 0.55) {
+        bestScore = score;
+        bestTicker = company.ticker;
+      }
+    }
+  }
+  return bestTicker;
 }
 
 // ─── KROK 4: Extract body text + PDF attachments from RSS description ─────────
@@ -168,12 +245,15 @@ function extractBodyAndAttachments(descHtml: string): {
 interface FetchResult {
   records:      EspiRecord[];
   totalItems:   number;
-  watchlistHit: number;
+  matchedCount: number;
 }
 
 /** Fetch ESPI records from a single RSS URL.
- *  Inserts ALL real records; ticker is best-effort from watchlist matching. */
-async function fetchRSS(url: string, tickers: Set<string>): Promise<FetchResult> {
+ *  Extracts emitter from URL/title and matches to company index. */
+async function fetchRSS(
+  url:          string,
+  companyIndex: CompanyEntry[],
+): Promise<FetchResult> {
   const res = await fetch(url, {
     headers: { "User-Agent": BROWSER_UA, "Accept": "application/rss+xml, application/xml, text/xml" },
   });
@@ -184,7 +264,7 @@ async function fetchRSS(url: string, tickers: Set<string>): Promise<FetchResult>
   if (items.length === 0) throw new Error("RSS returned 0 items");
 
   const records: EspiRecord[] = [];
-  let watchlistHit = 0;
+  let matchedCount = 0;
 
   for (const item of items) {
     const rawTitle = extractTag(item, "title");
@@ -194,19 +274,40 @@ async function fetchRSS(url: string, tickers: Set<string>): Promise<FetchResult>
 
     if (!rawTitle) continue;
 
-    const watchlistTicker = extractTicker(rawTitle, desc, tickers);
-    if (watchlistTicker) watchlistHit++;
+    // NAPRAWA A: Extract emitter from URL first, then title
+    const emitterFromUrl   = extractEmitterFromUrl(link);
+    const emitterFromTitle = extractEmitterFromTitle(rawTitle);
+    const emitter          = emitterFromUrl || emitterFromTitle;
 
-    const companyRaw     = rawTitle.split(":")[0].trim();
-    const candidateMatch = companyRaw.toUpperCase().match(/\b[A-Z0-9]{2,6}\b/);
-    const tickerFinal    = watchlistTicker ?? (candidateMatch?.[0] || companyRaw.slice(0, 6));
+    let tickers:           string[]              = [];
+    let ticker_confidence: Record<string, number> = {};
+
+    if (emitter) {
+      const ticker = findTickerForEmitter(emitter, companyIndex);
+      if (ticker) {
+        tickers           = [ticker];
+        ticker_confidence = { [ticker]: 1.0 };
+        matchedCount++;
+        console.log(`[fetch-espi] emitter match: "${emitter}" → ${ticker}`);
+      } else {
+        console.log(`[fetch-espi] emitter NOT matched: "${emitter}" (title: ${rawTitle.slice(0, 50)})`);
+      }
+    } else {
+      console.log(`[fetch-espi] emitter extraction failed: "${rawTitle.slice(0, 50)}"`);
+    }
+
+    // Strip company name from stored title (everything after the separator)
+    const titleBody = rawTitle.includes(":")
+      ? rawTitle.split(":").slice(1).join(":").trim()
+      : rawTitle.replace(/^[^–\-]+[–\-]\s*/, "").trim();
 
     // KROK 4: extract body text + attachments from RSS description
     const { body_text, attachments } = extractBodyAndAttachments(desc);
 
     records.push({
-      ticker:       tickerFinal,
-      title:        rawTitle.split(":").slice(1).join(":").trim() || rawTitle,
+      tickers,
+      ticker_confidence,
+      title:        titleBody || rawTitle,
       url:          link || null,
       published_at: parsePubDate(pubDate),
       body_text,
@@ -214,7 +315,7 @@ async function fetchRSS(url: string, tickers: Set<string>): Promise<FetchResult>
     });
   }
 
-  return { records, totalItems: items.length, watchlistHit };
+  return { records, totalItems: items.length, matchedCount };
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -234,42 +335,51 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-  // ── Load watchlist tickers ─────────────────────────────────────────────────
+  // ── Load company index for emitter matching ────────────────────────────────
   const { data: companies, error: compErr } = await supabase
     .from("companies")
-    .select("ticker");
+    .select("ticker, name");
 
-  if (compErr) {
-    console.warn("[fetch-espi] Could not load companies:", compErr.message);
+  if (compErr || !companies?.length) {
+    console.error("[fetch-espi] Failed to load companies:", compErr?.message);
+    return new Response(
+      JSON.stringify({ ok: false, error: "Failed to load companies" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
   }
 
-  const knownTickers = new Set<string>(
-    (companies ?? []).map((c: { ticker: string }) => c.ticker.toUpperCase()),
-  );
-  console.log(`[fetch-espi] Watchlist: ${knownTickers.size} tickers`);
+  // Build normalized index for fuzzy matching
+  const companyIndex: CompanyEntry[] = (companies as Array<{ ticker: string; name: string }>).map(c => ({
+    ticker:     c.ticker,
+    normalized: [
+      normalizeCompanyName(c.name),
+    ].filter(n => n.length >= 2),
+  }));
+
+  console.log(`[fetch-espi] Loaded ${companyIndex.length} companies for matching`);
 
   // ── Fetch real data from RSS sources ──────────────────────────────────────
   const RSS_SOURCES = [
-    { name: "bankier",  url: "https://www.bankier.pl/rss/espi.xml" },
-    { name: "gpw",      url: "https://www.gpw.pl/komunikaty?type=rss" },
+    { name: "bankier", url: "https://www.bankier.pl/rss/espi.xml" },
+    { name: "gpw",     url: "https://www.gpw.pl/komunikaty?type=rss" },
   ];
 
-  let records: EspiRecord[] = [];
+  let records:      EspiRecord[] = [];
   let sourceUsed   = "stub";
-  let watchlistHit = 0;
+  let matchedCount = 0;
   let totalItems   = 0;
 
   for (const src of RSS_SOURCES) {
     try {
-      const result = await fetchRSS(src.url, knownTickers);
+      const result = await fetchRSS(src.url, companyIndex);
       if (result.records.length > 0) {
         records      = result.records;
-        watchlistHit = result.watchlistHit;
+        matchedCount = result.matchedCount;
         totalItems   = result.totalItems;
         sourceUsed   = src.name;
-        const withBody  = result.records.filter(r => r.body_text).length;
-        const withAtts  = result.records.filter(r => r.attachments.length > 0).length;
-        console.log(`[fetch-espi] ${src.name}: ${result.totalItems} total, ${result.watchlistHit} watchlist hits → ${result.records.length} records (body_text: ${withBody}, attachments: ${withAtts})`);
+        const withBody = result.records.filter(r => r.body_text).length;
+        const withAtts = result.records.filter(r => r.attachments.length > 0).length;
+        console.log(`[fetch-espi] ${src.name}: ${result.totalItems} total, ${result.matchedCount} emitter matches → ${result.records.length} records (body: ${withBody}, attachments: ${withAtts})`);
         break;
       }
       console.log(`[fetch-espi] ${src.name}: returned 0 items, trying next`);
@@ -281,7 +391,7 @@ Deno.serve(async (_req: Request): Promise<Response> => {
 
   if (records.length === 0) {
     console.warn("[fetch-espi] All RSS sources failed — using stub fallback");
-    records    = STUB_RECORDS;
+    records    = [makeStub()];
     sourceUsed = "stub";
   }
 
@@ -318,34 +428,40 @@ Deno.serve(async (_req: Request): Promise<Response> => {
     console.log(`[fetch-espi] Bridge: processing ${records.length} records`);
 
     for (const record of records) {
-      const espiUrl = record.url ?? `espi-${record.ticker}-${record.published_at ?? Date.now()}`;
-      const hash    = await hashUrl(espiUrl);
+      // Build a unique key for hashing.
+      // GPW RSS reuses the same URL for all communications — append title to make unique.
+      const baseUrl  = record.url ?? "";
+      const isGenericUrl = baseUrl.includes("utm_campaign=") || baseUrl.includes("utm_source=");
+      const hashKey  = isGenericUrl
+        ? `${baseUrl}##${record.title}`
+        : (baseUrl || `espi-${record.tickers[0] ?? "unknown"}-${record.published_at ?? Date.now()}`);
+
+      const hash = await hashUrl(hashKey);
 
       const { data: upsertData, error: newsErr } = await supabase
         .from("news_items")
         .upsert({
-          url_hash:      hash,
-          url:           record.url ?? espiUrl,
-          source_url:    record.url ?? null,
-          title:         record.title,
-          summary:       null,
-          source:        "espi",
-          published_at:  record.published_at,
-          tickers:       [record.ticker],
-          category:      "regulatory",
-          impact_score:  8,
-          ai_processed:  false,
-          telegram_sent: false,
+          url_hash:          hash,
+          url:               record.url ?? hashKey,
+          source_url:        record.url ?? null,
+          title:             record.title,
+          summary:           null,
+          source:            "espi",
+          published_at:      record.published_at,
+          tickers:           record.tickers,
+          ticker_confidence: record.ticker_confidence,
+          category:          "regulatory",
+          impact_score:      8,
+          ai_processed:      false,
+          telegram_sent:     false,
           // KROK 4: store body text + PDF attachments
           body_text:    record.body_text,
-          attachments:  record.attachments.length > 0
-            ? record.attachments
-            : undefined,
+          attachments:  record.attachments.length > 0 ? record.attachments : undefined,
         }, { onConflict: "url_hash" })
         .select("id");
 
       if (newsErr) {
-        console.error(`[fetch-espi] Bridge error for ${record.ticker}: ${newsErr.message}`, newsErr.details ?? "");
+        console.error(`[fetch-espi] Bridge error for ${record.tickers.join(",")}: ${newsErr.message}`, newsErr.details ?? "");
         newsFailed++;
       } else if (upsertData && upsertData.length > 0) {
         newsInserted++;
@@ -363,8 +479,8 @@ Deno.serve(async (_req: Request): Promise<Response> => {
       inserted,
       source:        sourceUsed,
       total_rss:     totalItems,
-      watchlist_hit: watchlistHit,
-      tickers:       records.map(r => r.ticker),
+      emitter_match: matchedCount,
+      tickers:       [...new Set(records.flatMap(r => r.tickers))],
       ts:            new Date().toISOString(),
     }),
     { status: 200, headers: { "Content-Type": "application/json" } },

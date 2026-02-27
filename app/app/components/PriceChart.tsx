@@ -103,10 +103,11 @@ export default function PriceChart({ ticker }: { ticker: string }) {
     );
   }
 
-  if (error || !data.length) {
+  if (error || data.length < 2) {
     return (
-      <div className="h-[220px] rounded-xl border border-gray-800 bg-gray-900/40 flex items-center justify-center">
-        <span className="text-gray-600 text-sm">Brak danych cenowych</span>
+      <div className="h-[220px] rounded-xl border border-gray-800 bg-gray-900/40 flex flex-col items-center justify-center gap-1">
+        <span className="text-gray-500 text-sm font-medium">Brak historii cen</span>
+        <span className="text-gray-600 text-xs">Dane zbierane od momentu dodania spółki do watchlisty</span>
       </div>
     );
   }

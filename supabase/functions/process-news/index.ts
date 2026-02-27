@@ -24,12 +24,15 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface NewsItem {
-  id:       number;
-  title:    string;
-  summary:  string | null;
-  source:   string;
-  url:      string;
-  published_at: string | null;
+  id:                number;
+  title:             string;
+  summary:           string | null;
+  body_text:         string | null;
+  source:            string;
+  url:               string;
+  published_at:      string | null;
+  tickers:           string[] | null;
+  ticker_confidence: Record<string, number> | null;
 }
 
 interface KeyFact {
@@ -124,71 +127,53 @@ function extractTickersHeuristic(
 // ─── ZMIANA F: Stricter AI Analysis with confidence ───────────────────────────
 
 async function analyzeItem(
-  item:         NewsItem,
-  heuristic:    Map<string, number>,
-  allTickers:   string[],
-  openaiKey:    string,
+  item:       NewsItem,
+  openaiKey:  string,
 ): Promise<AIAnalysis | null> {
-  const heurContext = heuristic.size > 0
-    ? `\nHeurystyka znalazła: ${[...heuristic.entries()].map(([t, c]) => `${t}(${c.toFixed(1)})`).join(", ")} — zweryfikuj czy są GŁÓWNYM tematem`
-    : "";
+  // Prefer body_text over RSS summary — RSS summaries are often truncated HTML
+  const content = (item.body_text || item.summary || "").slice(0, 1800);
 
   const systemPrompt =
-    `Jesteś ekspertem analizy finansowej GPW i giełd światowych.
-Analizujesz polskie wiadomości finansowe i zwracasz WYŁĄCZNIE JSON bez markdown.
-
-POLE "relevance_score" — ocena ważności artykułu dla inwestora GPW (0.0–1.0):
-1.0 = Komunikat ESPI / raport regulacyjny spółki GPW
-0.9 = Wyniki finansowe, dywidenda, przejęcie, emisja akcji konkretnej spółki
-0.8 = Istotna informacja o konkretnej spółce (kontrakt, zmiana zarządu, prognoza)
-0.6 = Informacja o spółce w szerszym kontekście / artykuł branżowy
-0.4 = Komentarz makroekonomiczny (stopy, inflacja, PKB) z możliwym wpływem
-0.2 = Artykuł o zagranicznych rynkach / indeksach (SPX, DAX, NASDAQ)
-0.0 = Artykuł całkowicie niezwiązany z inwestowaniem na GPW
-
-KRYTYCZNE ZASADY dla pola "tickers" i "ticker_confidence":
-
-Dodaj ticker WYŁĄCZNIE gdy spełniony jest JEDEN z warunków:
-A) Nazwa spółki lub ticker są DOSŁOWNIE w tytule lub treści artykułu
-B) Artykuł to oficjalny komunikat tej spółki (ESPI/raport regulacyjny)
-C) Artykuł jest WYŁĄCZNIE o tej spółce (nie o sektorze/rynku)
-
-NIE dodawaj tickera gdy:
-- Spółka "mogłaby być dotknięta" tematem (np. stopy NBP → PKO, MBK)
-- Artykuł dotyczy całego sektora (energetyka → PKN, PGE; banki → MBK, PKO)
-- Spółka jest wspomniana jako przykład lub w kontekście ogólnym
-- Artykuł jest makroekonomiczny (stopy, inflacja, kurs walut, indeksy)
-- "ten", "art", "dom", "sim", "sat", "bio", "san" to pospolite słowa, nie tickery
-
-Dla KAŻDEGO znalezionego tickera podaj confidence 0.0–1.0:
-1.0 = spółka wprost wymieniona z nazwy i ticker w tytule
-0.9 = nazwa spółki wprost w tytule
-0.8 = nazwa spółki wprost w treści (nie tytule)
-0.7 = ticker/alias dosłownie w treści
-0.4 = AI uzało za sektorowo relevantne (ten próg jest za niski — nie używaj)
-
-Zwróć TYLKO tickers z confidence >= 0.7 w tablicy "tickers".
-Maksymalnie 3 tickers per artykuł. Jeśli nie masz pewności — zwróć [].
-
-Przykłady POPRAWNE:
-- "mBank ogłasza wyniki Q4" → tickers: ["MBK"], confidence: {"MBK": 0.95}
-- "PKN Orlen podpisał kontrakt z PGNiG" → tickers: ["PKN","PGN"], confidence: {"PKN": 0.9, "PGN": 0.8}
-- Komunikat ESPI od Text SA → tickers: ["TXT"], confidence: {"TXT": 1.0}
-
-Przykłady BŁĘDNE (nie rób tego):
-- Artykuł o stopach NBP → [] (nie: ["PKO","MBK"] — stopy to nie wyniki banków)
-- "Tekst przemówienia ministra" → [] (nie: ["TXT"] — "tekst" to słowo, nie spółka)
-- "Rynek energetyczny w Polsce" → [] (nie: ["PKN","PGE","TPE"])
-- Artykuł o kursie EUR/PLN → [] (nie: ["EUR","PLN"])`;
+    `Jesteś analitykiem finansowym GPW i rynków USA.
+Analizujesz artykuły prasowe i komunikaty spółek giełdowych.
+Odpowiadasz WYŁĄCZNIE w JSON, bez żadnego dodatkowego tekstu.`;
 
   const userPrompt =
-    `ZNANE TICKERY GPW: ${allTickers.slice(0, 200).join(", ")}${heurContext}
-ŹRÓDŁO: ${item.source}
-TYTUŁ: ${item.title}
-TREŚĆ: ${(item.summary ?? "").slice(0, 2000)}
+    `Przeanalizuj poniższy artykuł finansowy.
 
-Zwróć JSON:
+TYTUŁ: ${item.title}
+ŹRÓDŁO: ${item.source}
+URL: ${item.url}
+TREŚĆ: ${content || "(brak treści)"}
+
+ZASADY KRYTYCZNE:
+1. ai_summary: 1-2 zdania opisujące CO NAPRAWDĘ ZAWIERA ten artykuł.
+   - Czytaj TREŚĆ artykułu — nie zgaduj na podstawie tickera ani nazwy spółki
+   - Nie wolno wymyślać liczb ani faktów których nie ma w tekście
+   - Jeśli treść jest niedostępna (paywall) → napisz "Treść niedostępna: [skrócony tytuł]"
+
+2. tickers: TYLKO spółki których PEŁNA NAZWA lub TICKER pojawia się w tytule lub treści.
+   - Weryfikuj przez URL: jeśli URL zawiera "AMREST" → emitent to AmRest, nie inna spółka
+   - Jeśli artykuł dotyczy wielu spółek → wymień wszystkie (max 5)
+   - Jeśli artykuł jest ogólny (makro, regulacje, rynek) → zwróć []
+   - NIE dodawaj spółek na podstawie sektora ani domysłu
+
+3. ticker_confidence: pewność przypisania 0.0–1.0
+   - 1.0: spółka wprost wymieniona z nazwy w tytule lub URL ESPI
+   - 0.8: spółka wymieniona w treści z pełną nazwą
+   - 0.6: spółka wymieniona skrótem lub pośrednio
+   - Zwróć tylko tickers z confidence >= 0.6
+
+4. relevance_score: 0.0–1.0 jak bardzo artykuł jest istotny dla inwestorów GPW
+   - 1.0: oficjalny raport ESPI / SEC
+   - 0.8: wyniki finansowe, fuzje, dywidenda
+   - 0.6: istotne informacje o spółce lub sektorze
+   - 0.3: ogólne tło makroekonomiczne
+   - 0.1: niezwiązane z giełdą
+
+Odpowiedz TYLKO tym JSON (bez markdown, bez komentarzy):
 {
+  "ai_summary": "...",
   "tickers": [],
   "ticker_confidence": {},
   "relevance_score": 0.5,
@@ -196,7 +181,6 @@ Zwróć JSON:
   "sentiment": 0.0,
   "impact_score": 5,
   "category": "earnings|dividend|regulatory|macro|contract|management|ipo|buyback|espi|other",
-  "ai_summary": "Krótkie podsumowanie po polsku, max 150 znaków.",
   "key_facts": [{"type": "revenue|profit|dividend|contract|other", "description": "...", "detail": "...", "impact": "positive|negative|neutral"}],
   "topics": ["wyniki_finansowe|dywidenda|zmiana_zarządu|emisja_akcji|kontrakt|regulacje|prognoza|inne"],
   "is_breaking": false,
@@ -331,17 +315,25 @@ async function processItem(
   supabase:     SupabaseClient,
   aliasMap:     Map<string, string>,
   validTickers: Set<string>,
-  allTickers:   string[],
   openaiKey:    string,
 ): Promise<ProcessResult> {
-  // ZMIANA D: Heuristic with per-ticker confidence
+  // ZMIANA D: Heuristic with per-ticker confidence (for non-ESPI sources)
   const heuristicMap = extractTickersHeuristic(item.title, item.summary, aliasMap, validTickers);
 
-  // ZMIANA D: ESPI source → confidence 1.0 for all pre-extracted tickers
   const isEspi = item.source === "espi";
 
+  // ESPI pre-assigned tickers (set by fetch-espi with confidence 1.0)
+  // These were extracted from the URL/title and are authoritative — do NOT let AI override them
+  const espiPresetTickers: string[] = [];
+  if (isEspi && item.tickers && item.tickers.length > 0) {
+    for (const t of item.tickers) {
+      if (validTickers.has(t)) espiPresetTickers.push(t);
+    }
+  }
+
   // Paywall filter — skip AI for paywalled sources with no body content
-  if (PAYWALL_SOURCES.includes(item.source) && (!item.summary || item.summary.length < 100)) {
+  const hasContent = !!(item.body_text || (item.summary && item.summary.length >= 100));
+  if (PAYWALL_SOURCES.includes(item.source) && !hasContent) {
     const heurTickers = [...heuristicMap.keys()];
     const paywallConf: Record<string, number> = {};
     for (const [t, c] of heuristicMap) paywallConf[t] = c;
@@ -362,48 +354,57 @@ async function processItem(
 
   let analysis: AIAnalysis | null = null;
   try {
-    analysis = await analyzeItem(item, heuristicMap, allTickers, openaiKey);
+    analysis = await analyzeItem(item, openaiKey);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[process-news] item ${item.id} AI error: ${msg}`);
   }
 
-  // ── ZMIANA D: Merge heuristic + AI confidence ─────────────────────────────
+  // ── Build final ticker confidence map ─────────────────────────────────────
 
-  // Start with heuristic confidences
-  const mergedConf: Record<string, number> = {};
-  for (const [t, c] of heuristicMap) {
-    if (validTickers.has(t)) mergedConf[t] = c;
-  }
+  let mergedConf: Record<string, number> = {};
+  let finalTickers: string[] = [];
 
-  // Merge AI confidences — take max of heuristic and AI
-  if (analysis) {
-    // AI-validated tickers (from returned tickers array + confidence map)
-    const aiConf = analysis.ticker_confidence;
-    const aiTickers = analysis.tickers.filter(t => validTickers.has(t));
-
-    for (const t of aiTickers) {
-      const aiC = aiConf[t] ?? 0.75;  // default if AI returned ticker but no conf
-      mergedConf[t] = Math.max(mergedConf[t] ?? 0, aiC);
+  if (isEspi && espiPresetTickers.length > 0) {
+    // ESPI with pre-assigned tickers: trust fetch-espi's extraction (confidence 1.0)
+    // Still incorporate AI tickers if AI is very confident about additional companies
+    for (const t of espiPresetTickers) {
+      mergedConf[t] = ESPI_CONFIDENCE;
+    }
+    if (analysis) {
+      const aiConf = analysis.ticker_confidence;
+      for (const [t, c] of Object.entries(aiConf)) {
+        if (validTickers.has(t) && c >= 0.85 && !mergedConf[t]) {
+          mergedConf[t] = c;
+        }
+      }
+    }
+  } else {
+    // Non-ESPI or ESPI without pre-assigned tickers: use heuristic + AI
+    // Start with heuristic confidences
+    for (const [t, c] of heuristicMap) {
+      if (validTickers.has(t)) mergedConf[t] = c;
     }
 
-    // Also consider confidence map entries even if not in tickers[]
-    for (const [t, c] of Object.entries(aiConf)) {
-      if (validTickers.has(t) && c >= DISPLAY_THRESHOLD) {
-        mergedConf[t] = Math.max(mergedConf[t] ?? 0, c);
+    if (analysis) {
+      const aiConf    = analysis.ticker_confidence;
+      const aiTickers = analysis.tickers.filter(t => validTickers.has(t));
+
+      for (const t of aiTickers) {
+        const aiC = aiConf[t] ?? 0.75;
+        mergedConf[t] = Math.max(mergedConf[t] ?? 0, aiC);
+      }
+
+      for (const [t, c] of Object.entries(aiConf)) {
+        if (validTickers.has(t) && c >= DISPLAY_THRESHOLD) {
+          mergedConf[t] = Math.max(mergedConf[t] ?? 0, c);
+        }
       }
     }
   }
 
-  // ESPI override — official documents always confidence 1.0
-  if (isEspi) {
-    for (const t of Object.keys(mergedConf)) {
-      mergedConf[t] = ESPI_CONFIDENCE;
-    }
-  }
-
   // Only save tickers with confidence >= display threshold
-  const finalTickers = Object.entries(mergedConf)
+  finalTickers = Object.entries(mergedConf)
     .filter(([, c]) => c >= DISPLAY_THRESHOLD)
     .sort((a, b) => b[1] - a[1])  // highest confidence first
     .slice(0, 5)
@@ -532,13 +533,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     (companiesData ?? []).map((c: { ticker: string }) => c.ticker),
   );
 
-  const allTickers = [...validTickers];
-  console.log(`[process-news] ${aliasMap.size} aliases, ${allTickers.length} valid tickers`);
+  console.log(`[process-news] ${aliasMap.size} aliases, ${validTickers.size} valid tickers`);
 
   // ── Fetch unprocessed batch ────────────────────────────────────────────────
   const { data: items, error: fetchErr } = await supabase
     .from("news_items")
-    .select("id, title, summary, source, url, published_at")
+    .select("id, title, summary, body_text, source, url, published_at, tickers, ticker_confidence")
     .eq("ai_processed", false)
     .order("published_at", { ascending: false })
     .limit(limit);
@@ -574,7 +574,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (ci > 0) await sleep(SLEEP_BETWEEN);
 
     const results = await Promise.allSettled(
-      chunk.map(item => processItem(item, supabase, aliasMap, validTickers, allTickers, openaiKey)),
+      chunk.map(item => processItem(item, supabase, aliasMap, validTickers, openaiKey)),
     );
 
     for (const result of results) {
