@@ -461,7 +461,7 @@ async function processItem(
       ai_summary:        title.slice(0, 300),
       ticker_confidence: paywallConf,
       relevance_score:   paywallTickers.length > 0 ? 0.5 : 0.3,
-      ticker_method:     paywallTickers.length > 0 ? "deterministic" : null,
+      ticker_method:     isDeterministic ? "deterministic" : "paywall",
       ticker_evidence:   { ...debugInfo, paywall_skip: true },
       ticker_version:    2,
     };
@@ -522,7 +522,7 @@ async function processItem(
         if (validTickers.has(t) && c >= 0.85 && !mergedConf[t]) mergedConf[t] = c;
       }
     }
-    tickerMethod = "espi_preset";
+    tickerMethod = "espi_url";
 
   } else if (isDeterministic) {
     // 3-layer deterministic match succeeded → use it, AI tickers not overwritten
