@@ -2,5 +2,23 @@
   "framework": "nextjs",
   "installCommand": "npm install",
   "buildCommand": "npm run build",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "crons": [
+    {
+      "path": "/api/cron/fetch-news",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/fetch-espi",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/process-news",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/fetch-prices",
+      "schedule": "*/10 16-19 * * 1-5"
+    }
+  ]
 }

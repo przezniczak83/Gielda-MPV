@@ -16,7 +16,12 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("companies")
-    .select("ticker, name, sector, market, last_news_at, avg_sentiment_30d, news_count_30d")
+    .select(`
+      ticker, name, official_name, sector, market,
+      last_price, change_1d, price_updated_at,
+      health_score, rs_score, rs_trend,
+      last_news_at, avg_sentiment_30d, news_count_30d
+    `)
     .order("market")
     .order("ticker");
 

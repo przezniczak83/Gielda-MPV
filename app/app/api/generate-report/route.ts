@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     db.from("company_financials").select("revenue, ebitda, net_income, eps, period").eq("ticker", ticker).order("period", { ascending: false }).limit(4),
     db.from("company_kpis").select("kpi_type, value, metadata").eq("ticker", ticker).in("kpi_type", ["health_score", "moat_score", "dividend_score"]),
     db.from("price_history").select("date, close, volume, open, high, low").eq("ticker", ticker).order("date", { ascending: false }).limit(30),
-    db.from("news_items").select("title, published_at, source_name, impact_assessment, is_breaking").contains("tickers", [ticker]).order("published_at", { ascending: false }).limit(10),
+    db.from("news_items").select("title, published_at, source, impact_assessment, is_breaking").contains("tickers", [ticker]).order("published_at", { ascending: false }).limit(10),
   ]);
 
   const company  = companyRes.data;
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
   ).join("\n");
 
   const newsText = news.map(n =>
-    `[${n.published_at?.slice(0, 10) ?? "?"}][${n.source_name ?? "?"}]${n.is_breaking ? "[BREAKING]" : ""} ${n.title}${n.impact_assessment ? " — " + (n.impact_assessment as string).slice(0, 80) : ""}`
+    `[${n.published_at?.slice(0, 10) ?? "?"}][${n.source ?? "?"}]${n.is_breaking ? "[BREAKING]" : ""} ${n.title}${n.impact_assessment ? " — " + (n.impact_assessment as string).slice(0, 80) : ""}`
   ).join("\n");
 
   const prompt = `

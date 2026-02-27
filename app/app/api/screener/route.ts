@@ -77,8 +77,33 @@ interface ScreenerResult {
   computed_at: string;
 }
 
+// GET handler — accepts same filters via query params for simple use cases
+export async function GET(req: NextRequest) {
+  const sp = req.nextUrl.searchParams;
+  const body: ScreenerRequest = {
+    market:     (sp.get("market")     ?? "ALL") as ScreenerRequest["market"],
+    sector:     sp.get("sector")      ?? undefined,
+    health_min: sp.get("health_min")  ? Number(sp.get("health_min"))  : undefined,
+    health_max: sp.get("health_max")  ? Number(sp.get("health_max"))  : undefined,
+    price_min:  sp.get("price_min")   ? Number(sp.get("price_min"))   : undefined,
+    price_max:  sp.get("price_max")   ? Number(sp.get("price_max"))   : undefined,
+    change_min: sp.get("change_min")  ? Number(sp.get("change_min"))  : undefined,
+    change_max: sp.get("change_max")  ? Number(sp.get("change_max"))  : undefined,
+    rs_min:     sp.get("rs_min")      ? Number(sp.get("rs_min"))      : undefined,
+    rs_trend:   (sp.get("rs_trend")   ?? undefined) as ScreenerRequest["rs_trend"],
+    sort_by:    (sp.get("sort_by")    ?? "ticker") as ScreenerRequest["sort_by"],
+    sort_dir:   (sp.get("sort_dir")   ?? "asc")    as ScreenerRequest["sort_dir"],
+    limit:      sp.get("limit")       ? Number(sp.get("limit"))       : 50,
+  };
+  return handleScreener(body);
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json() as ScreenerRequest;
+  return handleScreener(body);
+}
+
+async function handleScreener(body: ScreenerRequest) {
 
   const {
     market     = "ALL",
